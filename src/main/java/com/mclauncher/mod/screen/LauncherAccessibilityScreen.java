@@ -35,31 +35,31 @@ public class LauncherAccessibilityScreen extends Screen {
         // 仅保留主菜单下有意义的选项
         net.minecraft.client.OptionInstance<?>[][] rows = {
                 {options.narrator()},
-                {options.showSubtitles()},
                 {options.menuBackgroundBlurriness()},
                 {options.notificationDisplayTime()},
-                {options.darkMojangStudiosBackground(), options.hideSplashTexts()},
+                {options.darkMojangStudiosBackground()},
                 {options.panoramaSpeed()},
                 {options.narratorHotkey()},
         };
 
-        int btnW = 150;
+        int halfW = 150;
         int gap = 6;
+        int rowW = halfW * 2 + gap;
         int y = top + 20;
         for (net.minecraft.client.OptionInstance<?>[] row : rows) {
-            int totalW = row.length * btnW + (row.length - 1) * gap;
-            int x = cx - totalW / 2;
+            int x = cx - rowW / 2;
             for (net.minecraft.client.OptionInstance<?> opt : row) {
-                AbstractWidget w = opt.createButton(this.options, x, y, btnW);
-                addRenderableWidget(w);
-                x += btnW + gap;
+                int w = row.length == 1 ? rowW : halfW;
+                AbstractWidget wgt = opt.createButton(this.options, x, y, w);
+                addRenderableWidget(wgt);
+                x += w + gap;
             }
             y += 24;
         }
 
         addRenderableWidget(Button.builder(Component.literal(I18n.get("mc_launcher.account.back")), b ->
                         this.minecraft.setScreen(parent))
-                .bounds(cx - 100, this.height - 32, 200, 20).build());
+                .bounds(cx - halfW, y + 8, halfW * 2, 20).build());
     }
 
     @Override
