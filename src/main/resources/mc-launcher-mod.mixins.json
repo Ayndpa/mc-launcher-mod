@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.mclauncher.mod.mixin",
+  "compatibilityLevel": "JAVA_17",
+  "client": [
+    "TitleScreenMixin",
+    "LanguageManagerMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

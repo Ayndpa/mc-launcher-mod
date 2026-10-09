@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "mc-launcher-mod",
+  "version": "${version}",
+  "name": "MC Launcher (Yes, In-Game)",
+  "description": "用 Minecraft 做的 Minecraft 启动器——在主菜单里嵌入一个完整的恶搞启动器界面。",
+  "authors": ["you"],
+  "license": "MIT",
+  "icon": "assets/mc-launcher-mod/icon.png",
+  "environment": "client",
+  "entrypoints": {
+    "client": ["com.mclauncher.mod.McLauncherMod"]
+  },
+  "mixins": [
+    "mc-launcher-mod.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.19.0",
+    "fabric-api": "*",
+    "minecraft": "~26.1.2"
+  }
+}

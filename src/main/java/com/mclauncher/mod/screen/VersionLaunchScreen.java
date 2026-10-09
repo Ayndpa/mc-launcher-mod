@@ -1,0 +1,191 @@
+package com.mclauncher.mod.screen;
+
+import com.mclauncher.mod.LauncherCore;
+import com.mclauncher.mod.LauncherState;
+
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.network.chat.Component;
+import net.minecraft.util.Mth;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.function.Supplier;
+
+/**
+ * 仿原版存档加载页（LevelLoadingScreen）的启动过渡界面：
+ * 居中标题 + 200px 黑底绿色进度条，阶段化推进进度。
+ * 启动失败时回到主菜单并弹出错误 Toast；成功后退出当前游戏。 */
+public class VersionLaunchScreen extends Screen {
+    /** 进度条几何（对齐原版 LevelLoadingScreen.drawProgressBar） */
+    private static final int BAR_WIDTH = 200;
+    private static final int BAR_HEIGHT = 2;
+    private static final int COLOR_BACK = 0xFF000000;
+    private static final int COLOR_FILL = 0xFF00FF00;
+
+    private final Screen parent;
+    private final String targetVersion;
+
+    private volatile String stageText = "准备启动…";
+    private volatile float progress = 0f;
+    private volatile java.lang.Process process;
+
+    public VersionLaunchScreen(Screen parent, String targetVersion) {
+        super(Component.literal("正在启动"));
+        this.parent = parent;
+        this.targetVersion = targetVersion;
+    }
+
+    @Override
+    protected void init() {
+        Thread t = new Thread(this::runLaunch, "mc-launcher-mod-launch");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    private void step(float p, String text) {
+        progress = p;
+        stageText = text;
+    }
+
+    private void runLaunch() {
+        Minecraft mc = Minecraft.getInstance();
+        try {
+            // 1. 版本存在性
+            step(0.10f, "检查版本 " + targetVersion + "…");
+            var opt = LauncherCore.findInstalled(targetVersion);
+            if (opt.isEmpty()) {
+                fail("版本 " + targetVersion + " 未安装（versions 目录中没有对应 JSON）");
+                return;
+            }
+            LauncherCore.InstalledVersion v = opt.get();
+
+            // 2. client jar
+            step(0.25f, "检查 client jar…");
+            if (v.jarPath() == null) {
+                fail("版本 " + targetVersion + " 缺少 client jar");
+                return;
+            }
+            sleep(200);
+
+            // 3. Java 检查
+            step(0.40f, "检查 Java 运行时…");
+            Path java = LauncherState.getChosenJava();
+            if (java == null) {
+                java = findDefaultJava();
+            }
+            if (java == null || !Files.exists(java)) {
+                fail("找不到可用的 Java，请在「Java 管理」中选择");
+                return;
+            }
+            sleep(200);
+
+            // 4. 组装启动参数并拉起进程
+            step(0.60f, "组装启动参数…");
+            String username = currentUsername(mc);
+            LauncherCore.LaunchResult r = LauncherCore.launch(targetVersion, java, username);
+            if (!r.ok()) {
+                fail(r.message());
+                return;
+            }
+            process = r.process();
+
+            // 5. 监控进程：远古版本等不兼容环境会让新进程几秒内崩溃，
+            //    只有存活确认通过才算成功，否则回主菜单报错
+            step(0.80f, "确认进程存活…");
+            if (process != null) {
+                String err = LauncherCore.confirmAlive(process, 6000);
+                if (err != null) {
+                    String detail = LauncherCore.processOutput(process);
+                    fail(detail.isEmpty() ? err : err + "\n" + detail);
+                    return;
+                }
+            }
+
+            // 6. 完成
+            step(1.00f, "已启动 " + targetVersion);
+            sleep(800);
+            Minecraft.getInstance().stop();
+        } catch (Exception e) {
+            fail("启动失败: " + e.getMessage());
+        }
+    }
+
+    private String currentUsername(Minecraft mc) {
+        com.mclauncher.mod.MicrosoftAuth.Account acc = com.mclauncher.mod.MicrosoftAuth.getAccount();
+        if (acc != null) {
+            return acc.name();
+        }
+        return mc.getUser().getName();
+    }
+
+    private Path findDefaultJava() {
+        // 未手动选择时：优先游戏目录 java/ 下的 JDK，其次系统 java
+        Path bundled = Minecraft.getInstance().gameDirectory.toPath().resolve("java");
+        if (Files.isDirectory(bundled)) {
+            try (var s = Files.list(bundled)) {
+                List<Path> dirs = s.filter(Files::isDirectory).toList();
+                for (Path dir : dirs) {
+                    Path exe = dir.resolve("bin").resolve("java.exe");
+                    if (Files.exists(exe)) {
+                        return exe;
+                    }
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        Path sys = Path.of("C:\\Windows\\System32\\java.exe");
+        return Files.exists(sys) ? sys : Path.of("java");
+    }
+
+    private void sleep(long ms) {
+        try {
+            Thread.sleep(ms);
+        } catch (InterruptedException ignored) {
+        }
+    }
+
+    /** 失败处理：回主菜单 + 错误 Toast，绝不退出游戏 */
+    private void fail(String message) {
+        progress = 0f;
+        Minecraft.getInstance().execute(() -> {
+            Toasts.error(message);
+            Minecraft.getInstance().setScreen(parent);
+        });
+    }
+
+    @Override
+    public void extractRenderState(GuiGraphicsExtractor g, int mouseX, int mouseY, float delta) {
+        // 原版加载页是纯色/模糊背景，不画全景
+        super.extractRenderState(g, mouseX, mouseY, delta);
+        int cx = this.width / 2;
+        int cy = this.height / 2;
+        int textTop = cy - 50;
+
+        g.centeredText(this.font, Component.literal("正在启动 " + targetVersion), cx, textTop, 0xFFFFFFFF);
+        g.centeredText(this.font, Component.literal(stageText), cx, textTop + 22, 0xFFAAAAAA);
+
+        // 进度条：与原版 LevelLoadingScreen.drawProgressBar 一致（黑底 + 绿色填充）
+        float smoothed = Mth.clamp(progress, 0f, 1f);
+        int left = cx - BAR_WIDTH / 2;
+        int top = textTop + this.font.lineHeight + 12;
+        g.fill(left, top, left + BAR_WIDTH, top + BAR_HEIGHT, COLOR_BACK);
+        g.fill(left, top, left + Math.round(smoothed * (float) BAR_WIDTH), top + BAR_HEIGHT, COLOR_FILL);
+
+        g.centeredText(this.font, (int) (smoothed * 100) + "%", cx, top + 10, 0xFFAAAAAA);
+
+        Toasts.draw(g, delta);
+    }
+
+    @Override
+    public boolean shouldCloseOnEsc() {
+        return false;
+    }
+
+    @Override
+    public boolean isPauseScreen() {
+        return false;
+    }
+}
