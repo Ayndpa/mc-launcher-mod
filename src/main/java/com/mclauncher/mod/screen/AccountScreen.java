@@ -8,9 +8,10 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.ObjectSelectionList;
-import net.minecraft.client.gui.components.PlayerSkinWidget;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -18,11 +19,10 @@ import java.util.List;
 /**
  * 账户管理子界面：以列表形式展示全部档案（微软正版 + 离线档案），
  * 支持新增微软登录 / 新增离线档案 / 切换激活档案 / 删除档案。
- * 皮肤模型实时反映当前选中的档案。 */
+ * 列表条目前显示玩家头像，悬停时在鼠标旁显示完整模型。 */
 public class AccountScreen extends Screen {
     private final Screen parent;
     private ProfileList list;
-    private PlayerSkinWidget skinWidget;
     private Button deleteButton;
 
     /** 列表条目：正版档案或离线档案 */
@@ -35,10 +35,8 @@ public class AccountScreen extends Screen {
     private record OfflineProfile(String name) implements Profile {
     }
 
-    /** 列表选中项；skinUuid 变化时重建皮肤组件 */
+    /** 列表选中项 */
     private Profile selected;
-    private String skinAccountUuid = "";
-    private String skinOfflineName = "";
 
     public AccountScreen(Screen parent) {
         super(Component.literal(I18n.get("mc_launcher.account.title")));
@@ -52,7 +50,7 @@ public class AccountScreen extends Screen {
 
         int listTop = top + 24;
         int listBottom = this.height - 108;
-        list = new ProfileList(this.minecraft, 380, listBottom - listTop, listTop, 24);
+        list = new ProfileList(this.minecraft, 380, listBottom - listTop, listTop, 28);
         list.setX((this.width - 380) / 2);
         addRenderableWidget(list);
         reloadProfiles();
@@ -79,10 +77,6 @@ public class AccountScreen extends Screen {
         addRenderableWidget(Button.builder(Component.literal(I18n.get("mc_launcher.account.back")), b ->
                         this.minecraft.setScreen(parent))
                 .bounds(cx - 50, this.height - 68, 100, 20).build());
-
-        // 皮肤组件放列表右侧
-        skinWidget = buildSkinWidget(Math.max(6, cx + 200 + 6), top + 24);
-        addRenderableWidget(skinWidget);
     }
 
     /** 重新从磁盘读取全部档案并刷新列表（登录/返回后调用） */
@@ -101,37 +95,18 @@ public class AccountScreen extends Screen {
         if (deleteButton != null) {
             deleteButton.active = false;
         }
-        skinAccountUuid = "";
-        skinOfflineName = "";
     }
 
-    private PlayerSkinWidget buildSkinWidget(int x, int y) {
-        PlayerSkinWidget w = new PlayerSkinWidget(88, 132, this.minecraft.getEntityModels(), this::currentSkinSupplier);
-        w.setX(x);
-        w.setY(y);
-        return w;
-    }
-
-    private net.minecraft.world.entity.player.PlayerSkin currentSkinSupplier() {
+    /** 档案对应的玩家皮肤（正版档案带 textures，离线档案用当前游戏档案皮肤） */
+    private net.minecraft.world.entity.player.PlayerSkin profileSkin(Profile p) {
         Minecraft mc = Minecraft.getInstance();
-        if (!skinAccountUuid.isEmpty()) {
+        if (p instanceof MsaProfile(MicrosoftAuth.Account acc) && !acc.uuid().isEmpty()) {
             // fetchProfile 补全 textures 属性后 SkinManager 才能加载皮肤与披风
             com.mojang.authlib.GameProfile profile = com.mclauncher.mod.SkinProfiles.withTextures(
-                    parseUuidShort(skinAccountUuid), skinDisplayName());
+                    parseUuidShort(acc.uuid()), acc.name());
             return mc.getSkinManager().createLookup(profile, false).get();
         }
         return mc.getSkinManager().createLookup(mc.getGameProfile(), false).get();
-    }
-
-    /** 选中档案的显示名（皮肤供应器用） */
-    private String skinDisplayName() {
-        if (selected instanceof OfflineProfile(String name)) {
-            return name;
-        }
-        if (selected instanceof MsaProfile(MicrosoftAuth.Account acc)) {
-            return acc.name();
-        }
-        return Minecraft.getInstance().getUser().getName();
     }
 
     private static java.util.UUID parseUuidShort(String shortUuid) {
@@ -188,28 +163,8 @@ public class AccountScreen extends Screen {
     }
 
     @Override
-    public void tick() {
-        super.tick();
-        // 选中项变化时重建皮肤组件（供应器捕获的是构造时的名称/uuid）
-        String uuid = selected instanceof MsaProfile(MicrosoftAuth.Account acc) ? acc.uuid() : "";
-        String offline = selected instanceof OfflineProfile(String name) ? name : "";
-        if (!uuid.equals(skinAccountUuid) || !offline.equals(skinOfflineName)) {
-            skinAccountUuid = uuid;
-            skinOfflineName = offline;
-            if (skinWidget != null) {
-                int x = skinWidget.getX();
-                int y = skinWidget.getY();
-                removeWidget(skinWidget);
-                skinWidget = buildSkinWidget(x, y);
-                addRenderableWidget(skinWidget);
-            }
-        }
-    }
-
-    @Override
     public void extractRenderState(GuiGraphicsExtractor g, int mouseX, int mouseY, float delta) {
         this.extractPanorama(g, delta);
-        super.extractRenderState(g, mouseX, mouseY, delta);
         int cx = this.width / 2;
         int top = Math.max(36, this.height / 6);
 
@@ -227,6 +182,24 @@ public class AccountScreen extends Screen {
         }
         g.centeredText(this.font, activeDesc, cx, top - 2, 0xFFAAAAAA);
 
+        // 悬停头像时，在鼠标旁渲染对应档案的完整玩家模型
+        hoverEntry = null;
+        super.extractRenderState(g, mouseX, mouseY, delta);
+        ProfileList.Entry hover = hoverEntry;
+        if (hover != null && this.minecraft != null) {
+            net.minecraft.world.entity.player.PlayerSkin skin = profileSkin(hover.profile);
+            boolean slim = skin.model() == net.minecraft.world.entity.player.PlayerModelType.SLIM;
+            net.minecraft.client.model.player.PlayerModel model = new net.minecraft.client.model.player.PlayerModel(
+                    this.minecraft.getEntityModels().bakeLayer(slim
+                            ? net.minecraft.client.model.geom.ModelLayers.PLAYER_SLIM
+                            : net.minecraft.client.model.geom.ModelLayers.PLAYER), slim);
+            float scale = 0.9F * HOVER_MODEL / 2.125F;
+            int mx = Math.min(mouseX + 12, this.width - HOVER_MODEL - 2);
+            int my = Math.min(mouseY - HOVER_MODEL / 2, this.height - HOVER_MODEL - 2);
+            g.skin(model, skin.body().texturePath(), scale, 0.0F, 0.0F, -1.0625F,
+                    mx, my, mx + HOVER_MODEL, my + HOVER_MODEL);
+        }
+
         Toasts.draw(g, delta);
     }
 
@@ -241,6 +214,14 @@ public class AccountScreen extends Screen {
     }
 
     // ---------- 档案列表 ----------
+
+    /** 列表条目前头像的边长（像素） */
+    private static final int AVATAR = 24;
+    /** 悬停头像时鼠标旁模型的边长（像素） */
+    private static final int HOVER_MODEL = 66;
+
+    /** 当前帧悬停头像所在的条目（渲染时写入，帧末用于画模型） */
+    private ProfileList.Entry hoverEntry;
 
     private class ProfileList extends ObjectSelectionList<ProfileList.Entry> {
 
@@ -282,23 +263,31 @@ public class AccountScreen extends Screen {
 
             @Override
             public void extractContent(GuiGraphicsExtractor g, int mouseX, int mouseY, boolean hovered, float delta) {
-                int color = ProfileList.this.getSelected() == this ? 0xFF55FF55 : (isActive() ? 0xFF7FDFFF : 0xFFFFFFFF);
-                int left = this.getContentX();
-                int top = this.getContentY();
-                if (profile instanceof MsaProfile(MicrosoftAuth.Account acc)) {
-                    String label = I18n.get("mc_launcher.account.entry_msa", acc.name())
-                            + (isActive() ? I18n.get("mc_launcher.account.active_tag") : "");
-                    g.text(AccountScreen.this.font, label, left + 4, top + 3, color);
-                    g.text(AccountScreen.this.font, I18n.get("mc_launcher.account.uuid", formatUuid(acc.uuid())),
-                            left + 4, top + 13, 0xFF888888);
-                } else if (profile instanceof OfflineProfile(String name)) {
-                    String label = I18n.get("mc_launcher.account.entry_offline", name)
-                            + (isActive() ? I18n.get("mc_launcher.account.active_tag") : "");
-                    g.text(AccountScreen.this.font, label, left + 4, top + 3, color);
-                    g.text(AccountScreen.this.font, I18n.get("mc_launcher.account.offline_tag"),
-                            left + 4, top + 13, 0xFF888888);
-                }
+            int color = ProfileList.this.getSelected() == this ? 0xFF55FF55 : (isActive() ? 0xFF7FDFFF : 0xFFFFFFFF);
+            int left = this.getContentX();
+            int top = this.getContentY();
+            int textX = left + AVATAR + 6;
+            if (profile instanceof MsaProfile(MicrosoftAuth.Account acc)) {
+                String label = I18n.get("mc_launcher.account.entry_msa", acc.name())
+                        + (isActive() ? I18n.get("mc_launcher.account.active_tag") : "");
+                g.text(AccountScreen.this.font, label, textX, top + 3, color);
+                g.text(AccountScreen.this.font, I18n.get("mc_launcher.account.uuid", formatUuid(acc.uuid())),
+                        textX, top + 16, 0xFF888888);
+            } else if (profile instanceof OfflineProfile(String name)) {
+                String label = I18n.get("mc_launcher.account.entry_offline", name)
+                        + (isActive() ? I18n.get("mc_launcher.account.active_tag") : "");
+                g.text(AccountScreen.this.font, label, textX, top + 3, color);
+                g.text(AccountScreen.this.font, I18n.get("mc_launcher.account.offline_tag"),
+                        textX, top + 16, 0xFF888888);
             }
+            // 条目前绘制玩家头像（皮肤贴图 8x8 头部区域放大到 AVATAR）
+            Identifier faceTex = profileSkin(profile).body().texturePath();
+                g.blit(RenderPipelines.GUI_TEXTURED, faceTex, left, top + 2, AVATAR, AVATAR,
+                        8, 8, 8, 8, 64, 64);
+            if (hovered) {
+                hoverEntry = this;
+            }
+        }
 
             @Override
             public boolean mouseClicked(net.minecraft.client.input.MouseButtonEvent event, boolean doubled) {
