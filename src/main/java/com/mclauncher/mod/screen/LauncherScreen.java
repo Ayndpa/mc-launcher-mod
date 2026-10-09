@@ -150,13 +150,14 @@ public class LauncherScreen extends Screen {
 
             // 对齐原版背包界面：身体/腿保持静止，手臂用原版 HumanoidModel
             // 的待机呼吸动画（AnimationUtils.bobModelPart，zRot 外张 + 微幅摆动）
-            idleAge += delta * 20.0F;
+            idleAge += delta;
+            // delta 是部分 tick（0~1），原版 ageInTicks 每 tick +1，直接累加即可
             model.body.yRot = 0.0F;
             model.body.xRot = 0.0F;
             model.head.xRot = headPitchDeg * ((float) Math.PI / 180F);
             model.head.yRot = headYawDeg * ((float) Math.PI / 180F);
-            model.hat.xRot = model.head.xRot;
-            model.hat.yRot = model.head.yRot;
+            // hat 是 head 的子节点，自动跟随头部旋转，手动再设会叠加双倍角度
+            // 导致双层皮肤外层与内层不对称，保持默认即可
             model.rightArm.xRot = 0.0F;
             model.rightArm.zRot = 0.0F;
             model.leftArm.xRot = 0.0F;
