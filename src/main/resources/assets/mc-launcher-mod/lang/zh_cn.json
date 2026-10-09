@@ -101,6 +101,7 @@
   "mc_launcher.java.select_first": "请先在列表中选择一个 Java",
   "mc_launcher.java.chosen": "已选择 %s",
   "mc_launcher.java.label": "Java %s",
+  "mc_launcher.java.priority_hint": "越靠上优先级越高，启动时按游戏版本自动匹配",
 
   "mc_launcher.java_path.title": "添加 Java 路径",
   "mc_launcher.java_path.prompt": "输入 Java 安装目录或 java.exe 路径",

@@ -64,10 +64,6 @@ public class LauncherOptionsScreen extends Screen {
                 () -> new JavaManagerScreen(this, LauncherState.getChosenJava())));
         rows.addChild(openScreenButton(Component.literal(I18n.get("mc_launcher.proxy_settings")),
                 () -> new ProxySettingsScreen(this)));
-        rows.addChild(Button.builder(slimLabel(), b -> {
-            LauncherState.setSlimResources(!LauncherState.isSlimResources());
-            b.setMessage(slimLabel());
-        }).build());
 
         this.layout.addToFooter(Button.builder(Component.literal(I18n.get("mc_launcher.options_screen.done")),
                         b -> this.onClose())
@@ -84,13 +80,6 @@ public class LauncherOptionsScreen extends Screen {
 
     private Button openScreenButton(Component label, Supplier<Screen> target) {
         return Button.builder(label, b -> this.minecraft.setScreen(target.get())).build();
-    }
-
-    private static Component slimLabel() {
-        return Component.literal(I18n.get("mc_launcher.slim_resources")
-                + ": " + I18n.get(LauncherState.isSlimResources()
-                        ? "mc_launcher.slim_resources.on"
-                        : "mc_launcher.slim_resources.off"));
     }
 
     @Override

@@ -101,6 +101,7 @@
   "mc_launcher.java.select_first": "Select a Java from the list first",
   "mc_launcher.java.chosen": "Selected %s",
   "mc_launcher.java.label": "Java %s",
+  "mc_launcher.java.priority_hint": "Higher entries take priority; matched automatically per game version",
 
   "mc_launcher.java_path.title": "Add Java Path",
   "mc_launcher.java_path.prompt": "Enter a Java installation folder or java.exe path",

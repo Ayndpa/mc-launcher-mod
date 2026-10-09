@@ -33,7 +33,8 @@ public final class LauncherState {
     }
 
     private static String selectedVersion;
-    private static Path chosenJava;
+    /** Java 优先级列表（越靠前优先级越高），启动时按游戏版本要求自动匹配 */
+    private static List<Path> javaPriority = new ArrayList<>();
 
     /** 当前生效的档案：activeOfflineName 非空 → 离线档案；否则用 activeMsaUuid 指向的正版账号 */
     private static String activeMsaUuid;
@@ -76,6 +77,16 @@ public final class LauncherState {
                 selectedVersion = v;
             }
             slimResources = Boolean.parseBoolean(p.getProperty("slim.resources", "true"));
+            String jp = p.getProperty("java.priority", "");
+            if (!jp.isBlank()) {
+                List<Path> list = new ArrayList<>();
+                for (String s : jp.split("\\|")) {
+                    if (!s.isBlank() && Files.exists(Path.of(s))) {
+                        list.add(Path.of(s));
+                    }
+                }
+                javaPriority = list;
+            }
         } catch (IOException ignored) {
         }
     }
@@ -89,6 +100,8 @@ public final class LauncherState {
             p.setProperty("proxy.host", proxyHost);
             p.setProperty("proxy.port", String.valueOf(proxyPort));
             p.setProperty("slim.resources", String.valueOf(slimResources));
+            p.setProperty("java.priority", String.join("|",
+                    javaPriority.stream().map(Path::toString).toList()));
             if (selectedVersion != null && !selectedVersion.isBlank()) {
                 p.setProperty("selected.version", selectedVersion);
             }
@@ -153,11 +166,52 @@ public final class LauncherState {
     }
 
     public static Path getChosenJava() {
-        return chosenJava;
+        return javaPriority.isEmpty() ? null : javaPriority.get(0);
     }
 
     public static void setChosenJava(Path p) {
-        chosenJava = p;
+        if (p == null) {
+            return;
+        }
+        javaPriority.remove(p);
+        javaPriority.add(0, p);
+        save();
+    }
+
+    // ---------- Java 优先级 ----------
+
+    /** 优先级列表（索引越小优先级越高） */
+    public static List<Path> getJavaPriority() {
+        return new ArrayList<>(javaPriority);
+    }
+
+    public static void setJavaPriority(List<Path> list) {
+        javaPriority = new ArrayList<>(list);
+        save();
+    }
+
+    /** 把 exe 上移一位；已在顶部则忽略 */
+    public static boolean moveJavaUp(Path exe) {
+        int i = javaPriority.indexOf(exe);
+        if (i <= 0) {
+            return false;
+        }
+        javaPriority.remove(i);
+        javaPriority.add(i - 1, exe);
+        save();
+        return true;
+    }
+
+    /** 把 exe 下移一位；已在底部则忽略 */
+    public static boolean moveJavaDown(Path exe) {
+        int i = javaPriority.indexOf(exe);
+        if (i < 0 || i >= javaPriority.size() - 1) {
+            return false;
+        }
+        javaPriority.remove(i);
+        javaPriority.add(i + 1, exe);
+        save();
+        return true;
     }
 
     // ---------- 档案 ----------

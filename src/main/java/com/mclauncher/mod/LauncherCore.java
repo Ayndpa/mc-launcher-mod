@@ -438,6 +438,73 @@ public final class LauncherCore {
         }
     }
 
+    /** 解析 java -version 输出的主版本号（如 25.0.2 → 25），失败返回 -1 */
+    public static int javaMajor(Path exe) {
+        String v = probeJava(exe)[0];
+        try {
+            String first = v.split("[.\\-+]")[0];
+            if (first.equals("1")) {
+                // 1.8.0_x → 8
+                return Integer.parseInt(v.split("\\.")[1]);
+            }
+            return Integer.parseInt(first);
+        } catch (Exception e) {
+            return -1;
+        }
+    }
+
+    /** 从版本 JSON（含继承链）读 javaVersion.majorVersion，缺失返回 -1 */
+    public static int requiredJavaMajor(Path versionJson) {
+        try {
+            JsonObject json = JsonParser.parseString(Files.readString(versionJson)).getAsJsonObject();
+            while (true) {
+                if (json.has("javaVersion") && json.getAsJsonObject("javaVersion").has("majorVersion")) {
+                    return json.getAsJsonObject("javaVersion").get("majorVersion").getAsInt();
+                }
+                if (!json.has("inheritsFrom")) {
+                    return -1;
+                }
+                Path parent = versionJson.getParent().resolve(json.get("inheritsFrom").getAsString() + ".json");
+                if (!Files.exists(parent)) {
+                    return -1;
+                }
+                json = JsonParser.parseString(Files.readString(parent)).getAsJsonObject();
+            }
+        } catch (Exception e) {
+            return -1;
+        }
+    }
+
+    /**
+     * 按游戏版本自动选择 Java：遍历用户的优先级列表，
+     * 取第一个主版本 >= 所需版本（未知要求时任意版本可用）的 Java；
+     * 都不满足则返回优先级列表第一个仍存在的 Java（尽力启动）。
+     */
+    public static Path pickJavaFor(Path versionJson) {
+        List<Path> prio = LauncherState.getJavaPriority();
+        if (prio.isEmpty()) {
+            return null;
+        }
+        int required = requiredJavaMajor(versionJson);
+        Path firstAlive = null;
+        for (Path exe : prio) {
+            if (!Files.exists(exe)) {
+                continue;
+            }
+            if (firstAlive == null) {
+                firstAlive = exe;
+            }
+            if (required < 0) {
+                return exe;
+            }
+            int major = javaMajor(exe);
+            if (major >= required) {
+                return exe;
+            }
+        }
+        return firstAlive;
+    }
+
     // ---------- 真实启动 ----------
 
     /** 启动结果 */
@@ -504,7 +571,8 @@ public final class LauncherCore {
 
             String assetIndex = readAssetIndex(v);
             String natives = v.jsonPath().getParent().resolve("natives").toString();
-            extractNatives(json, v, Path.of(natives), gameDir);
+            // 库根 = 实例目录/libraries（downloads.path 是相对 libraries 的路径）
+            extractNatives(json, v, Path.of(natives), gameDir.resolve("libraries"));
             Files.createDirectories(Path.of(natives));
 
             // mainClass 与参数模板来自版本 JSON：远古版本（rd-xxx）的 mainClass 是
@@ -523,12 +591,20 @@ public final class LauncherCore {
 
             List<String> cmd = new ArrayList<>();
             cmd.add(javaExe.toAbsolutePath().toString());
-            cmd.add("-Djava.library.path=" + natives);
-            cmd.add("-Dminecraft.launcher.brand=mc-launcher-mod");
-            cmd.add("-Dminecraft.launcher.version=1.0");
-            cmd.add("-cp");
-            cmd.add(classpath);
-            cmd.add(mainClass);
+            // 26.x 版本 JSON 用现代 jvm 参数模板（${natives_directory} 等占位符），
+            // 且 natives 按子目录分类（java/jna/lwjgl/netty）。旧版本没有该模板，
+            // 沿用固定的老参数（library.path 指 natives 根）
+            boolean modernJvm = json.has("arguments") && json.getAsJsonObject("arguments").has("jvm");
+            if (modernJvm) {
+                addModernJvmArgs(cmd, json, natives, classpath, mainClass);
+            } else {
+                cmd.add("-Djava.library.path=" + natives);
+                cmd.add("-Dminecraft.launcher.brand=mc-launcher-mod");
+                cmd.add("-Dminecraft.launcher.version=1.0");
+                cmd.add("-cp");
+                cmd.add(classpath);
+                cmd.add(mainClass);
+            }
             String accessToken = authed && msa != null ? msa.accessToken() : "0";
             String uuid = authed && msa != null ? msa.uuid() : "00000000000000000000000000004660";
             String userType = authed && msa != null ? "msa" : "legacy";
@@ -553,7 +629,15 @@ public final class LauncherCore {
                 }
             }
 
-            Process proc = new ProcessBuilder(cmd).directory(gameDir.toFile()).start();
+            // 输出重定向到实例 logs/launcher-out.log：不读管道的话游戏日志写满
+            // 管道缓冲区会把子进程永久卡死（启动器表现为卡在 100% 不返回）
+            Path outFile = gameDir.resolve("logs").resolve("launcher-out.log");
+            Files.createDirectories(outFile.getParent());
+            Process proc = new ProcessBuilder(cmd)
+                    .directory(gameDir.toFile())
+                    .redirectOutput(outFile.toFile())
+                    .redirectErrorStream(true)
+                    .start();
             return new LaunchResult(true, I18n.get("mc_launcher.launch.launched", versionId), proc);
         } catch (Exception e) {
             return new LaunchResult(false, I18n.get("mc_launcher.launch.failed", e.getMessage()));
@@ -581,11 +665,59 @@ public final class LauncherCore {
         return null;
     }
 
-    /** 读取新进程崩溃时的输出（供错误提示） */
+    /**
+     * 解析版本 JSON 的 arguments.jvm 模板（跳过 os/arch 规则块），替换占位符。
+     * 26.x 的 natives 按用途分放在 natives/java、natives/jna、natives/lwjgl、natives/netty
+     * 子目录，extractNatives 保留 jar 内目录结构后这些路径由各库条目的相对路径自然形成。
+     */
+    private static void addModernJvmArgs(List<String> cmd, JsonObject json, String natives,
+                                         String classpath, String mainClass) {
+        for (JsonElement el : json.getAsJsonObject("arguments").getAsJsonArray("jvm")) {
+            if (el.isJsonObject()) {
+                continue;
+            }
+            String a = el.getAsString()
+                    .replace("${natives_directory}", natives)
+                    .replace("${launcher_name}", "mc-launcher-mod")
+                    .replace("${launcher_version}", "1.0")
+                    .replace("${classpath}", classpath)
+                    .replace("${classpath_separator}", ";")
+                    .replace("${version_name}", json.has("id")
+                            ? json.get("id").getAsString() : "unknown");
+            cmd.add(a);
+        }
+        cmd.add(mainClass);
+    }
+
+    /** 读取新进程崩溃时的输出（重定向到 launcher-out.log，供错误提示） */
     public static String processOutput(Process proc) {
         try {
-            byte[] out = proc.getInputStream().readAllBytes();
-            String s = new String(out).trim();
+            // 输出已重定向到文件，直接读日志尾部
+            Path log = Minecraft.getInstance().gameDirectory.toPath();
+            return tailLog(findLauncherOutLog());
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    private static Path findLauncherOutLog() {
+        try {
+            Path base = Minecraft.getInstance().gameDirectory.toPath();
+            Path p = base.resolve("logs").resolve("launcher-out.log");
+            if (Files.exists(p)) {
+                return p;
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
+    }
+
+    private static String tailLog(Path log) {
+        try {
+            if (log == null || !Files.exists(log)) {
+                return "";
+            }
+            String s = Files.readString(log).trim();
             if (s.length() > 300) {
                 s = "…" + s.substring(s.length() - 300);
             }
@@ -595,7 +727,7 @@ public final class LauncherCore {
         }
     }
 
-    /** 从 versions/<id>/natives/ 下的 natives-*.jar 解出 dll（跳过 META-INF），幂等 */
+    /** 从 versions/<id>/natives/ 下的 natives jar 解出 dll（跳过 META-INF），幂等 */
     private static void extractNatives(JsonObject versionJson, InstalledVersion v, Path nativesDir, Path libsRoot) {
         try {
             Files.createDirectories(nativesDir);
@@ -605,34 +737,46 @@ public final class LauncherCore {
             String osName = System.getProperty("os.name").toLowerCase().contains("win") ? "windows" : "linux";
             for (JsonElement el : versionJson.getAsJsonArray("libraries")) {
                 JsonObject lib = el.getAsJsonObject();
-                if (!lib.has("natives") || !lib.getAsJsonObject("natives").has(osName)) {
-                    continue;
+                Path jar = null;
+                if (lib.has("natives") && lib.getAsJsonObject("natives").has(osName)
+                        && lib.has("downloads") && lib.getAsJsonObject("downloads").has("classifiers")) {
+                    // 旧格式：natives classifier + downloads.classifiers
+                    String classifier = lib.getAsJsonObject("natives").get(osName).getAsString();
+                    JsonObject classifiers = lib.getAsJsonObject("downloads").getAsJsonObject("classifiers");
+                    if (classifiers.has(classifier)) {
+                        String rel = classifiers.getAsJsonObject(classifier).get("path").getAsString();
+                        jar = libsRoot.resolve(rel);
+                    }
+                } else {
+                    // 新格式（26.x）：natives 是独立库条目，坐标末段为 natives-<os>
+                    String name = lib.has("name") ? lib.get("name").getAsString() : "";
+                    String[] parts = name.split(":");
+                    if (parts.length >= 4 && parts[3].equals("natives-" + osName)
+                            && lib.has("downloads") && lib.getAsJsonObject("downloads").has("artifact")) {
+                        String rel = lib.getAsJsonObject("downloads").getAsJsonObject("artifact")
+                                .get("path").getAsString();
+                        jar = libsRoot.resolve(rel);
+                    }
                 }
-                if (!lib.has("downloads") || !lib.getAsJsonObject("downloads").has("classifiers")) {
-                    continue;
-                }
-                String classifier = lib.getAsJsonObject("natives").get(osName).getAsString();
-                JsonObject classifiers = lib.getAsJsonObject("downloads").getAsJsonObject("classifiers");
-                if (!classifiers.has(classifier)) {
-                    continue;
-                }
-                String rel = classifiers.getAsJsonObject(classifier).get("path").getAsString();
-                Path jar = libsRoot.resolve(rel);
-                if (!Files.exists(jar)) {
+                if (jar == null || !Files.exists(jar)) {
                     continue;
                 }
                 try (var zip = new java.util.zip.ZipFile(jar.toFile())) {
                     var entries = zip.entries();
                     while (entries.hasMoreElements()) {
                         var e = entries.nextElement();
-                        if (e.isDirectory() || e.getName().contains("META-INF")) {
+                        String entryName = e.getName().replace('\\', '/');
+                        if (e.isDirectory() || entryName.contains("META-INF")) {
                             continue;
                         }
-                        String fileName = e.getName().substring(e.getName().lastIndexOf('/') + 1);
-                        Path target = nativesDir.resolve(fileName);
-                        if (Files.exists(target)) {
+                        // 保留 jar 内目录结构：LWJGL 3.4.x 按
+                        // <library.path>/<os>/<arch>/<package>/<lib>.dll 查找（bundled 布局），
+                        // 旧版 natives jar 本身就是根目录平铺，直接兼容
+                        Path target = nativesDir.resolve(entryName).normalize();
+                        if (!target.startsWith(nativesDir) || Files.exists(target)) {
                             continue;
                         }
+                        Files.createDirectories(target.getParent());
                         try (var in = zip.getInputStream(e)) {
                             Files.copy(in, target);
                         }

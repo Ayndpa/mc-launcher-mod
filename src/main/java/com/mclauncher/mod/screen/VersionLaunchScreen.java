@@ -72,9 +72,10 @@ public class VersionLaunchScreen extends Screen {
             }
             sleep(200);
 
-            // 3. Java 检查
+            // 3. Java 检查：按游戏版本的 javaVersion 要求自动从优先级列表选择
             step(0.40f, I18n.get("mc_launcher.launch.check_java"));
-            Path java = LauncherState.getChosenJava();
+            Path versionJson = v.jsonPath();
+            Path java = LauncherCore.pickJavaFor(versionJson);
             if (java == null) {
                 java = findDefaultJava();
             }
@@ -126,11 +127,14 @@ public class VersionLaunchScreen extends Screen {
      */
     private void hideAndWatch(java.lang.Process proc, String version) {
         Minecraft mc = Minecraft.getInstance();
-        // 在渲染线程最小化窗口（GLFW 调用需在主线程），
-        // 并暂停声音系统，避免音乐在后台继续播放
+        // 在渲染线程隐藏窗口（GLFW 调用需在主线程）。
+        // 音乐处理：仅 stop() 不够——MusicManager.tick 发现当前音乐停止后会立刻
+        // 播放下一首（本界面属于菜单界面，音乐音量恒为 1），所以这里暂停整个
+        // 声音引擎（pauseAllExcept 无例外），恢复时再 resume。
         mc.execute(() -> {
-            org.lwjgl.glfw.GLFW.glfwIconifyWindow(mc.getWindow().handle());
+            org.lwjgl.glfw.GLFW.glfwHideWindow(mc.getWindow().handle());
             mc.getSoundManager().stop();
+            mc.getSoundManager().pauseAllExcept();
         });
 
         Thread watcher = new Thread(() -> {
@@ -140,7 +144,6 @@ public class VersionLaunchScreen extends Screen {
             }
             mc.execute(() -> {
                 long handle = mc.getWindow().handle();
-                org.lwjgl.glfw.GLFW.glfwRestoreWindow(handle);
                 org.lwjgl.glfw.GLFW.glfwShowWindow(handle);
                 org.lwjgl.glfw.GLFW.glfwFocusWindow(handle);
                 mc.getSoundManager().resume();
@@ -150,6 +153,12 @@ public class VersionLaunchScreen extends Screen {
         }, "mc-launcher-mod-process-watch");
         watcher.setDaemon(true);
         watcher.start();
+    }
+
+    /** 启动进行中不提供界面背景音乐，避免 MusicManager 在隐藏期间反复点歌 */
+    @Override
+    public net.minecraft.sounds.Music getBackgroundMusic() {
+        return null;
     }
 
     private String currentUsername(Minecraft mc) {

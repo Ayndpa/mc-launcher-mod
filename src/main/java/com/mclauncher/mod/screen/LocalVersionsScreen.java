@@ -128,6 +128,11 @@ public class LocalVersionsScreen extends Screen {
                 .bounds(cx - 154, this.height - 20, 100, 20).build();
         verifyBtn.active = false;
         addRenderableWidget(verifyBtn);
+
+        // 整合包安装（.mrpack）
+        addRenderableWidget(Button.builder(Component.literal(I18n.get("mc_launcher.modpack")), b -> this.minecraft
+                        .setScreen(new ModpackScreen(this)))
+                .bounds(cx + 54, this.height - 20, 100, 20).build());
     }
 
     private void reload() {
