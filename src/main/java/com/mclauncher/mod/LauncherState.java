@@ -68,6 +68,10 @@ public final class LauncherState {
                 proxyPort = Integer.parseInt(p.getProperty("proxy.port", String.valueOf(proxyPort)));
             } catch (NumberFormatException ignored) {
             }
+            String v = p.getProperty("selected.version", "");
+            if (!v.isBlank()) {
+                selectedVersion = v;
+            }
         } catch (IOException ignored) {
         }
     }
@@ -80,6 +84,9 @@ public final class LauncherState {
             p.setProperty("proxy.mode", proxyMode.name());
             p.setProperty("proxy.host", proxyHost);
             p.setProperty("proxy.port", String.valueOf(proxyPort));
+            if (selectedVersion != null && !selectedVersion.isBlank()) {
+                p.setProperty("selected.version", selectedVersion);
+            }
             try (var out = Files.newOutputStream(f)) {
                 p.store(out, "mc-launcher-mod config");
             }
@@ -125,6 +132,7 @@ public final class LauncherState {
 
     public static void setSelectedVersion(String v) {
         selectedVersion = v;
+        save();
     }
 
     public static Path getChosenJava() {

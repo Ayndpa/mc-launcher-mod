@@ -115,8 +115,9 @@ public class AccountScreen extends Screen {
     private net.minecraft.world.entity.player.PlayerSkin currentSkinSupplier() {
         Minecraft mc = Minecraft.getInstance();
         if (!skinAccountUuid.isEmpty()) {
-            com.mojang.authlib.GameProfile profile =
-                    new com.mojang.authlib.GameProfile(parseUuidShort(skinAccountUuid), skinDisplayName());
+            // fetchProfile 补全 textures 属性后 SkinManager 才能加载皮肤与披风
+            com.mojang.authlib.GameProfile profile = com.mclauncher.mod.SkinProfiles.withTextures(
+                    parseUuidShort(skinAccountUuid), skinDisplayName());
             return mc.getSkinManager().createLookup(profile, false).get();
         }
         return mc.getSkinManager().createLookup(mc.getGameProfile(), false).get();

@@ -62,6 +62,8 @@ public class LauncherOptionsScreen extends Screen {
                 () -> new net.minecraft.client.gui.screens.CreditsAndAttributionScreen(this)));
         rows.addChild(openScreenButton(Component.literal(I18n.get("mc_launcher.java_manager")),
                 () -> new JavaManagerScreen(this, LauncherState.getChosenJava())));
+        rows.addChild(openScreenButton(Component.literal(I18n.get("mc_launcher.proxy_settings")),
+                () -> new ProxySettingsScreen(this)));
 
         this.layout.addToFooter(Button.builder(Component.literal(I18n.get("mc_launcher.options_screen.done")),
                         b -> this.onClose())

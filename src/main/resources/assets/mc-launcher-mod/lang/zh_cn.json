@@ -160,6 +160,7 @@
   "mc_launcher.launch.no_java": "找不到可用的 Java，请在「Java 管理」中选择",
   "mc_launcher.launch.failed": "启动失败: %s",
   "mc_launcher.launch.exited_early": "版本进程启动后立刻退出 (exit code %s)",
+  "mc_launcher.launch.game_exited": "%s 已退出，欢迎回来",
 
   "mc_launcher.multiplayer": "多人游戏",
   "mc_launcher.multiplayer.title": "多人游戏",

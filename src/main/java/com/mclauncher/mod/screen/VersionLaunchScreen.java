@@ -18,7 +18,8 @@ import java.util.function.Supplier;
 /**
  * 仿原版存档加载页（LevelLoadingScreen）的启动过渡界面：
  * 居中标题 + 200px 黑底绿色进度条，阶段化推进进度。
- * 启动失败时回到主菜单并弹出错误 Toast；成功后退出当前游戏。 */
+ * 启动失败时回到主菜单并弹出错误 Toast；成功后隐藏启动器窗口，
+ * 等目标 Minecraft 进程退出后再恢复显示。 */
 public class VersionLaunchScreen extends Screen {
     /** 进度条几何（对齐原版 LevelLoadingScreen.drawProgressBar） */
     private static final int BAR_WIDTH = 200;
@@ -105,13 +106,44 @@ public class VersionLaunchScreen extends Screen {
                 }
             }
 
-            // 6. 完成
+            // 6. 完成：隐藏当前启动器窗口并等待目标进程退出，
+            //    玩家退出 Minecraft 进程后再恢复显示启动器（不再自动退出）
             step(1.00f, I18n.get("mc_launcher.launch.launched", targetVersion));
             sleep(800);
-            Minecraft.getInstance().stop();
+            if (process != null) {
+                hideAndWatch(process, targetVersion);
+            } else {
+                fail(I18n.get("mc_launcher.launch.failed", "process == null"));
+            }
         } catch (Exception e) {
             fail(I18n.get("mc_launcher.launch.failed", e.getMessage()));
         }
+    }
+
+    /**
+     * 隐藏启动器窗口，后台线程等待目标 Minecraft 进程结束，
+     * 进程退出后在渲染线程恢复窗口并回到启动器主界面。
+     */
+    private void hideAndWatch(java.lang.Process proc, String version) {
+        Minecraft mc = Minecraft.getInstance();
+        // 在渲染线程隐藏窗口（GLFW 调用需在主线程）
+        mc.execute(() -> org.lwjgl.glfw.GLFW.glfwHideWindow(mc.getWindow().handle()));
+
+        Thread watcher = new Thread(() -> {
+            try {
+                proc.waitFor();
+            } catch (InterruptedException ignored) {
+            }
+            mc.execute(() -> {
+                long handle = mc.getWindow().handle();
+                org.lwjgl.glfw.GLFW.glfwShowWindow(handle);
+                org.lwjgl.glfw.GLFW.glfwFocusWindow(handle);
+                Toasts.info(I18n.get("mc_launcher.launch.game_exited", version));
+                mc.setScreen(parent);
+            });
+        }, "mc-launcher-mod-process-watch");
+        watcher.setDaemon(true);
+        watcher.start();
     }
 
     private String currentUsername(Minecraft mc) {

@@ -11,29 +11,19 @@ import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.PlayerSkinWidget;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
-
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
+import net.minecraft.resources.Identifier;
+import net.minecraft.util.Mth;
 
 /**
  * 恶搞启动器主界面：用 Minecraft 做的“Minecraft 启动器”。
  * 版本选择（子界面 + 分类列表）、Java 管理、语言设置、微软正版登录、实时玩家模型。
- * “开始游戏”会真实拉起所选版本的新 java 进程；启动当前版本则播放彩蛋进度条。 */
+ * “开始游戏”会真实拉起所选版本的新 java 进程。 */
 public class LauncherScreen extends Screen {
-    /** 彩蛋进度条文案，惰性从 lang 取（I18n 不能在类加载早期静态初始化时调用） */
-    private static final int FAKE_STEP_COUNT = 5;
-    private static final int TICKS_PER_STEP = 35;
-
     private Button versionButton;
     private Button playButton;
     private PlayerSkinWidget skinWidget;
-    private Component status;
     private String launchedVersion;
 
-    private int fakeProgress = -1;
-    private int tickCounter = 0;
-    private boolean done = false;
     /** 登录/续期完成后重建皮肤组件（PlayerSkinWidget 的供应器是构造时捕获的） */
     private volatile boolean skinRefreshPending = false;
 
@@ -47,13 +37,19 @@ public class LauncherScreen extends Screen {
         int top = Math.max(40, this.height / 4);
 
         launchedVersion = Minecraft.getInstance().getLaunchedVersion();
-        if (launchedVersion == null || launchedVersion.isBlank()) {
-            // Fabric 环境下可能拿不到运行版本，兜底扫描本地版本或用固定值
-            var installed = LauncherCore.scanInstalled();
-            launchedVersion = installed.isEmpty() ? "26.1.2" : installed.get(installed.size() - 1).id();
-        }
-        if (LauncherState.getSelectedVersion() == null || LauncherState.getSelectedVersion().isBlank()) {
-            LauncherState.setSelectedVersion(launchedVersion);
+
+        var installed = LauncherCore.scanInstalled();
+        // 版本选择逻辑：记住上次选择 → 上次选择仍存在 → 默认第一个版本；列表为空则禁用开始游戏
+        String savedSel = LauncherState.getSelectedVersion();
+        boolean savedExists = savedSel != null && !savedSel.isBlank()
+                && installed.stream().anyMatch(v -> v.id().equals(savedSel));
+        String sel;
+        if (savedExists) {
+            sel = savedSel;
+        } else {
+            // 无记录或记录的版本已被删除 → 默认第一个版本
+            sel = installed.isEmpty() ? null : installed.get(0).id();
+            LauncherState.setSelectedVersion(sel);
         }
 
         versionButton = Button.builder(versionLabel(), b -> this.minecraft
@@ -63,6 +59,7 @@ public class LauncherScreen extends Screen {
 
         playButton = Button.builder(Component.literal(I18n.get("mc_launcher.play")), b -> startGame())
                 .bounds(cx - 100, top + 60, 200, 20).build();
+        playButton.active = sel != null;
         addRenderableWidget(playButton);
 
         // 第二行：多人游戏（只可添加/查看服务器）
@@ -79,17 +76,6 @@ public class LauncherScreen extends Screen {
         int widgetX = Math.max(6, cx - 100 - 118);
         skinWidget = buildSkinWidget(widgetX, top + 8);
         addRenderableWidget(skinWidget);
-
-        // 第三行：打开目录 + 退出
-        addRenderableWidget(Button.builder(Component.literal(I18n.get("mc_launcher.open_gamedir")), b -> openGameDir())
-                .bounds(cx - 100, top + 140, 98, 20).build());
-        addRenderableWidget(Button.builder(Component.literal(I18n.get("mc_launcher.quit")), b -> Minecraft.getInstance().stop())
-                .bounds(cx + 2, top + 140, 98, 20).build());
-
-        // 第四行：代理设置
-        addRenderableWidget(Button.builder(Component.literal(I18n.get("mc_launcher.proxy_settings")), b -> this.minecraft
-                        .setScreen(new ProxySettingsScreen(this)))
-                .bounds(cx - 100, top + 166, 98, 20).build());
     }
 
     /** 主界面打开时若存有凭据，静默续期；登录后刷新皮肤与账号显示 */
@@ -113,11 +99,77 @@ public class LauncherScreen extends Screen {
         return w;
     }
 
-    /** 点击玩家模型进入账户管理界面 */
+    /**
+     * 点击玩家模型进入账户管理界面。
+     * 自绘渲染：头部与视线跟随全屏鼠标指针，附带类似游戏内背包界面的轻微待机摆动。
+     */
     private class ClickableSkinWidget extends PlayerSkinWidget {
+        private static final float MODEL_HEIGHT = 2.125F;
+        private static final float PIVOT_Y = -1.0625F;
+
+        private final net.minecraft.client.model.player.PlayerModel wideModel;
+        private final net.minecraft.client.model.player.PlayerModel slimModel;
+        private float idleAge;
+
         ClickableSkinWidget(int width, int height, net.minecraft.client.model.geom.EntityModelSet modelSet,
                             java.util.function.Supplier<net.minecraft.world.entity.player.PlayerSkin> skin) {
             super(width, height, modelSet, skin);
+            wideModel = new net.minecraft.client.model.player.PlayerModel(
+                    modelSet.bakeLayer(net.minecraft.client.model.geom.ModelLayers.PLAYER), false);
+            slimModel = new net.minecraft.client.model.player.PlayerModel(
+                    modelSet.bakeLayer(net.minecraft.client.model.geom.ModelLayers.PLAYER_SLIM), true);
+        }
+
+        @Override
+        public void mouseMoved(double mouseX, double mouseY) {
+            super.mouseMoved(mouseX, mouseY);
+            // 26.x 的 Screen.mouseMoved 是空实现不向下分发，但渲染参数会带真实鼠标位置，
+            // 这里仅记录“见过鼠标”用于初始朝向过渡
+            mouseSeen = true;
+        }
+
+        private float headYawDeg = 30.0F;
+        private float headPitchDeg;
+        private boolean mouseSeen;
+
+        @Override
+        protected void extractWidgetRenderState(net.minecraft.client.gui.GuiGraphicsExtractor g, int mouseX, int mouseY, float delta) {
+            // 全屏鼠标坐标 → 头部目标角度（模型有 Z 轴翻转，水平方向取反），限幅 ±75°/±40°
+            float dx = mouseX - (this.getX() + this.getWidth() / 2.0F);
+            float dy = mouseY - (this.getY() + this.getHeight() * 0.3F);
+            float headTargetYaw = Mth.clamp(-dx * 0.25F, -75.0F, 75.0F);
+            float headTargetPitch = Mth.clamp(dy * 0.25F, -40.0F, 40.0F);
+            // 平滑插值让头部转动自然；鼠标从未动过时保持默认朝向
+            float t = mouseSeen ? 0.3F : 1.0F;
+            headYawDeg += (headTargetYaw - headYawDeg) * t;
+            headPitchDeg += (headTargetPitch - headPitchDeg) * t;
+
+            net.minecraft.world.entity.player.PlayerSkin skin = currentSkinSupplier();
+            boolean slim = skin.model() == net.minecraft.world.entity.player.PlayerModelType.SLIM;
+            net.minecraft.client.model.player.PlayerModel model = slim ? slimModel : wideModel;
+
+            // 对齐原版背包界面：身体/腿保持静止，手臂用原版 HumanoidModel
+            // 的待机呼吸动画（AnimationUtils.bobModelPart，zRot 外张 + 微幅摆动）
+            idleAge += delta * 20.0F;
+            model.body.yRot = 0.0F;
+            model.body.xRot = 0.0F;
+            model.head.xRot = headPitchDeg * ((float) Math.PI / 180F);
+            model.head.yRot = headYawDeg * ((float) Math.PI / 180F);
+            model.hat.xRot = model.head.xRot;
+            model.hat.yRot = model.head.yRot;
+            model.rightArm.xRot = 0.0F;
+            model.rightArm.zRot = 0.0F;
+            model.leftArm.xRot = 0.0F;
+            model.leftArm.zRot = 0.0F;
+            net.minecraft.client.model.AnimationUtils.bobModelPart(model.rightArm, idleAge, 1.0F);
+            net.minecraft.client.model.AnimationUtils.bobModelPart(model.leftArm, idleAge, -1.0F);
+            model.rightLeg.xRot = 0.0F;
+            model.leftLeg.xRot = 0.0F;
+
+            float scale = 0.97F * this.getHeight() / MODEL_HEIGHT;
+            Identifier texture = skin.body().texturePath();
+            g.skin(model, texture, scale, 0.0F, 0.0F, PIVOT_Y,
+                    this.getX(), this.getY(), this.getRight(), this.getBottom());
         }
 
         @Override
@@ -135,8 +187,9 @@ public class LauncherScreen extends Screen {
         }
         MicrosoftAuth.Account acc = MicrosoftAuth.getAccount();
         if (acc != null && !acc.uuid().isEmpty()) {
-            com.mojang.authlib.GameProfile profile =
-                    new com.mojang.authlib.GameProfile(parseUuidShort(acc.uuid()), acc.name());
+            // fetchProfile 补全 textures 属性后 SkinManager 才能加载皮肤与披风
+            com.mojang.authlib.GameProfile profile = com.mclauncher.mod.SkinProfiles.withTextures(
+                    parseUuidShort(acc.uuid()), acc.name());
             return mc.getSkinManager().createLookup(profile, false).get();
         }
         return mc.getSkinManager().createLookup(mc.getGameProfile(), false).get();
@@ -150,6 +203,9 @@ public class LauncherScreen extends Screen {
 
     private Component versionLabel() {
         String v = LauncherState.getSelectedVersion();
+        if (v == null || v.isBlank()) {
+            return Component.literal(I18n.get("mc_launcher.version_none"));
+        }
         if (v.equals(launchedVersion)) {
             return Component.literal(I18n.get("mc_launcher.version_running", v));
         }
@@ -157,29 +213,8 @@ public class LauncherScreen extends Screen {
     }
 
     private void startGame() {
-        String target = LauncherState.getSelectedVersion();
-        if (target.equals(launchedVersion)) {
-            // 启动的就是当前正在运行的版本 —— 彩蛋进度条
-            if (fakeProgress >= 0) {
-                return;
-            }
-            fakeProgress = 0;
-            tickCounter = 0;
-            done = false;
-            playButton.active = false;
-            status = Component.literal(fakeStep(0));
-            return;
-        }
-        // 真实启动其它版本：进入仿原版的启动加载页（失败会回到本界面并弹错误提示）
-        this.minecraft.setScreen(new VersionLaunchScreen(this, target));
-    }
-
-    private void openGameDir() {
-        try {
-            new ProcessBuilder("explorer.exe", Minecraft.getInstance().gameDirectory.getAbsolutePath()).start();
-        } catch (IOException ignored) {
-            Toasts.error(I18n.get("mc_launcher.open_gamedir_failed"));
-        }
+        // 真实启动所选版本：进入仿原版的启动加载页（失败会回到本界面并弹错误提示）
+        this.minecraft.setScreen(new VersionLaunchScreen(this, LauncherState.getSelectedVersion()));
     }
 
     @Override
@@ -193,30 +228,6 @@ public class LauncherScreen extends Screen {
             skinWidget = buildSkinWidget(x, y);
             addRenderableWidget(skinWidget);
         }
-        if (fakeProgress >= 0 && !done) {
-            tickCounter++;
-            if (tickCounter % TICKS_PER_STEP == 0) {
-                fakeProgress++;
-                if (fakeProgress >= FAKE_STEP_COUNT) {
-                    done = true;
-                    status = Component.literal(I18n.get("mc_launcher.fake_done"));
-                } else {
-                    status = Component.literal(fakeStep(fakeProgress));
-                }
-            }
-        }
-    }
-
-    /** 彩蛋进度条文案，运行时惰性取，避免类加载早期调用 I18n */
-    private static String fakeStep(int i) {
-        return switch (i) {
-            case 0 -> I18n.get("mc_launcher.fake_step_1");
-            case 1 -> I18n.get("mc_launcher.fake_step_2");
-            case 2 -> I18n.get("mc_launcher.fake_step_3");
-            case 3 -> I18n.get("mc_launcher.fake_step_4");
-            case 4 -> I18n.get("mc_launcher.fake_step_5");
-            default -> "";
-        };
     }
 
     @Override
@@ -230,26 +241,10 @@ public class LauncherScreen extends Screen {
         g.centeredText(this.font, I18n.get("mc_launcher.title"), cx, top - 22, 0xFFFFFFFF);
         g.centeredText(this.font, I18n.get("mc_launcher.title_subtitle"), cx, top - 10, 0xFFAAAAAA);
 
-        if (status != null) {
-            g.text(this.font, status, cx - 100, top + 144, done ? 0xFF55FF55 : 0xFFFFFFFF);
-        }
         g.text(this.font, Component.literal(I18n.get("mc_launcher.click_model_hint")),
                 Math.max(6, cx - 100 - 118), top + 116, 0xFF888888);
 
         Toasts.draw(g, delta);
-
-        if (fakeProgress >= 0) {
-            int barW = 200;
-            int barH = 6;
-            int bx = cx - barW / 2;
-            int by = top + 158;
-            int total = FAKE_STEP_COUNT * TICKS_PER_STEP;
-            int elapsed = Math.min(total, fakeProgress * TICKS_PER_STEP + tickCounter % TICKS_PER_STEP);
-            float frac = (float) elapsed / total;
-            int filled = (int) (barW * frac);
-            g.fill(bx, by, bx + barW, by + barH, 0xFF222222);
-            g.fill(bx, by, bx + filled, by + barH, done ? 0xFF55FF55 : 0xFF3B82F6);
-        }
     }
 
     @Override

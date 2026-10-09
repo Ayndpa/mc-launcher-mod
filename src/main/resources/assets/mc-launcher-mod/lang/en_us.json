@@ -160,6 +160,7 @@
   "mc_launcher.launch.no_java": "No usable Java found, please select one in the Java Manager",
   "mc_launcher.launch.failed": "Launch failed: %s",
   "mc_launcher.launch.exited_early": "Version process exited immediately after launch (exit code %s)",
+  "mc_launcher.launch.game_exited": "%s has exited, welcome back",
 
   "mc_launcher.multiplayer": "Multiplayer",
   "mc_launcher.multiplayer.title": "Multiplayer",
