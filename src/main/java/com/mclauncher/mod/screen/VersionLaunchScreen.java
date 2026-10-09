@@ -126,8 +126,12 @@ public class VersionLaunchScreen extends Screen {
      */
     private void hideAndWatch(java.lang.Process proc, String version) {
         Minecraft mc = Minecraft.getInstance();
-        // 在渲染线程隐藏窗口（GLFW 调用需在主线程）
-        mc.execute(() -> org.lwjgl.glfw.GLFW.glfwHideWindow(mc.getWindow().handle()));
+        // 在渲染线程最小化窗口（GLFW 调用需在主线程），
+        // 并暂停声音系统，避免音乐在后台继续播放
+        mc.execute(() -> {
+            org.lwjgl.glfw.GLFW.glfwIconifyWindow(mc.getWindow().handle());
+            mc.getSoundManager().stop();
+        });
 
         Thread watcher = new Thread(() -> {
             try {
@@ -136,8 +140,10 @@ public class VersionLaunchScreen extends Screen {
             }
             mc.execute(() -> {
                 long handle = mc.getWindow().handle();
+                org.lwjgl.glfw.GLFW.glfwRestoreWindow(handle);
                 org.lwjgl.glfw.GLFW.glfwShowWindow(handle);
                 org.lwjgl.glfw.GLFW.glfwFocusWindow(handle);
+                mc.getSoundManager().resume();
                 Toasts.info(I18n.get("mc_launcher.launch.game_exited", version));
                 mc.setScreen(parent);
             });
