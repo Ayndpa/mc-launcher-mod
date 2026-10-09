@@ -7,7 +7,8 @@
     "TitleScreenMixin",
     "LanguageManagerMixin",
     "ReloadableResourceManagerMixin",
-    "AccessibilityOnboardingScreenMixin"
+    "AccessibilityOnboardingScreenMixin",
+    "MinecraftSuspendMixin"
   ],
   "injectors": {
     "defaultRequire": 1

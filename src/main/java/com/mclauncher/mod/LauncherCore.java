@@ -498,7 +498,13 @@ public final class LauncherCore {
                 return exe;
             }
             int major = javaMajor(exe);
-            if (major >= required) {
+            if (required <= 8) {
+                // jre-legacy：必须精确 Java 8，Launchwrapper 在 9+ 上
+                // 会因 AppClassLoader 无法转 URLClassLoader 而崩溃
+                if (major == 8) {
+                    return exe;
+                }
+            } else if (major >= required) {
                 return exe;
             }
         }
@@ -571,9 +577,13 @@ public final class LauncherCore {
 
             String assetIndex = readAssetIndex(v);
             String natives = v.jsonPath().getParent().resolve("natives").toString();
+            boolean modernJvm = json.has("arguments") && json.getAsJsonObject("arguments").has("jvm");
+            // 现代模板把 java.library.path 指向 natives/java，jna/netty/lwjgl 各有
+            // 自己的 tmp 目录（由运行时自行解压）；旧版本直接用 natives 根
+            Path nativesExtractDir = Path.of(natives, modernJvm ? "java" : "");
             // 库根 = 实例目录/libraries（downloads.path 是相对 libraries 的路径）
-            extractNatives(json, v, Path.of(natives), gameDir.resolve("libraries"));
-            Files.createDirectories(Path.of(natives));
+            extractNatives(json, v, nativesExtractDir, gameDir.resolve("libraries"));
+            Files.createDirectories(nativesExtractDir);
 
             // mainClass 与参数模板来自版本 JSON：远古版本（rd-xxx）的 mainClass 是
             // com.mojang.rubydung.RubyDung 且只有 ${auth_player_name} ${auth_session}，
@@ -594,7 +604,6 @@ public final class LauncherCore {
             // 26.x 版本 JSON 用现代 jvm 参数模板（${natives_directory} 等占位符），
             // 且 natives 按子目录分类（java/jna/lwjgl/netty）。旧版本没有该模板，
             // 沿用固定的老参数（library.path 指 natives 根）
-            boolean modernJvm = json.has("arguments") && json.getAsJsonObject("arguments").has("jvm");
             if (modernJvm) {
                 addModernJvmArgs(cmd, json, natives, classpath, mainClass);
             } else {

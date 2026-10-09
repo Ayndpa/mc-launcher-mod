@@ -33,6 +33,8 @@ public class VersionLaunchScreen extends Screen {
     private volatile String stageText = I18n.get("mc_launcher.launch.preparing");
     private volatile float progress = 0f;
     private volatile java.lang.Process process;
+    /** 游戏运行中、启动器窗口已隐藏时为 true（用于 tick 掐背景音乐） */
+    private volatile boolean hidden;
 
     public VersionLaunchScreen(Screen parent, String targetVersion) {
         super(Component.literal(I18n.get("mc_launcher.launch.title")));
@@ -127,14 +129,13 @@ public class VersionLaunchScreen extends Screen {
      */
     private void hideAndWatch(java.lang.Process proc, String version) {
         Minecraft mc = Minecraft.getInstance();
-        // 在渲染线程隐藏窗口（GLFW 调用需在主线程）。
-        // 音乐处理：仅 stop() 不够——MusicManager.tick 发现当前音乐停止后会立刻
-        // 播放下一首（本界面属于菜单界面，音乐音量恒为 1），所以这里暂停整个
-        // 声音引擎（pauseAllExcept 无例外），恢复时再 resume。
+        // 隐藏窗口 + 通过 MinecraftSuspendMixin 冻结整个宿主 MC 的
+        // runTick（不渲染、不跑任何游戏/音乐逻辑），只泵 GLFW 事件；
+        // 比逐个掐 stopPlaying/pauseAllExcept 干净彻底
         mc.execute(() -> {
             org.lwjgl.glfw.GLFW.glfwHideWindow(mc.getWindow().handle());
-            mc.getSoundManager().stop();
-            mc.getSoundManager().pauseAllExcept();
+            com.mclauncher.mod.LauncherSuspend.suspended = true;
+            hidden = true;
         });
 
         Thread watcher = new Thread(() -> {
@@ -142,23 +143,19 @@ public class VersionLaunchScreen extends Screen {
                 proc.waitFor();
             } catch (InterruptedException ignored) {
             }
+            // 必须先解除挂起：mc.execute 的任务队列是在 runTick 里消费的，
+            // 挂起期间 runTick 被跳过，先排队的话恢复任务永远执行不到
+            com.mclauncher.mod.LauncherSuspend.suspended = false;
             mc.execute(() -> {
                 long handle = mc.getWindow().handle();
                 org.lwjgl.glfw.GLFW.glfwShowWindow(handle);
                 org.lwjgl.glfw.GLFW.glfwFocusWindow(handle);
-                mc.getSoundManager().resume();
                 Toasts.info(I18n.get("mc_launcher.launch.game_exited", version));
                 mc.setScreen(parent);
             });
         }, "mc-launcher-mod-process-watch");
         watcher.setDaemon(true);
         watcher.start();
-    }
-
-    /** 启动进行中不提供界面背景音乐，避免 MusicManager 在隐藏期间反复点歌 */
-    @Override
-    public net.minecraft.sounds.Music getBackgroundMusic() {
-        return null;
     }
 
     private String currentUsername(Minecraft mc) {
