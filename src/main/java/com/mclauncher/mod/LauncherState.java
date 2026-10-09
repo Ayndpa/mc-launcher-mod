@@ -45,6 +45,9 @@ public final class LauncherState {
     private static volatile String proxyHost = "127.0.0.1";
     private static volatile int proxyPort = 7897;
 
+    /** 资源精简：主菜单只加载必需素材（方块/物品纹理、模型、大体积音效等不加载） */
+    private static volatile boolean slimResources = true;
+
     private static final String CONFIG_FILE = "launcher-cache/config.properties";
 
     private LauncherState() {
@@ -72,6 +75,7 @@ public final class LauncherState {
             if (!v.isBlank()) {
                 selectedVersion = v;
             }
+            slimResources = Boolean.parseBoolean(p.getProperty("slim.resources", "true"));
         } catch (IOException ignored) {
         }
     }
@@ -84,6 +88,7 @@ public final class LauncherState {
             p.setProperty("proxy.mode", proxyMode.name());
             p.setProperty("proxy.host", proxyHost);
             p.setProperty("proxy.port", String.valueOf(proxyPort));
+            p.setProperty("slim.resources", String.valueOf(slimResources));
             if (selectedVersion != null && !selectedVersion.isBlank()) {
                 p.setProperty("selected.version", selectedVersion);
             }
@@ -122,6 +127,18 @@ public final class LauncherState {
 
     public static void setProxyPort(int port) {
         proxyPort = port;
+    }
+
+    // ---------- 资源精简 ----------
+
+    public static boolean isSlimResources() {
+        return slimResources;
+    }
+
+    /** 切换后需要重启游戏（或触发一次资源重载）才生效 */
+    public static void setSlimResources(boolean b) {
+        slimResources = b;
+        save();
     }
 
     // ---------- 版本 / Java ----------

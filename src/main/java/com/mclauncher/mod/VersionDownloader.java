@@ -49,13 +49,20 @@ public final class VersionDownloader {
         final long size; // -1 未知
         final String sha1; // null 表示无校验
         final String label;
+        /** 非 null：优先从该已有文件（校验通过后）复制到 dest，如 virtual assets */
+        final Path copyFrom;
 
         Task(String url, Path dest, long size, String sha1, String label) {
+            this(url, dest, size, sha1, label, null);
+        }
+
+        Task(String url, Path dest, long size, String sha1, String label, Path copyFrom) {
             this.url = url;
             this.dest = dest;
             this.size = size;
             this.sha1 = sha1;
             this.label = label;
+            this.copyFrom = copyFrom;
         }
     }
 
@@ -68,6 +75,9 @@ public final class VersionDownloader {
     private final AtomicInteger filesDone = new AtomicInteger();
     private final AtomicReference<String> currentFile = new AtomicReference<>("");
     private final Object pauseLock = new Object();
+    /** 首次下载时索引尚未落地：先只下索引，start() 前用它收集资源对象 */
+    private Path pendingAssetIndexPath;
+    private Path pendingAssetDir;
     private volatile State state = State.IDLE;
     private volatile int maxConcurrency = 4;
     private volatile String failMessage = "";
@@ -152,12 +162,19 @@ public final class VersionDownloader {
                     continue;
                 }
                 JsonObject dl = lib.getAsJsonObject("downloads");
-                if (dl == null || !dl.has("artifact")) {
+                if (dl == null) {
                     continue;
                 }
-                JsonObject artifact = dl.getAsJsonObject("artifact");
-                String name = lib.has("name") ? lib.get("name").getAsString() : artifact.get("path").getAsString();
-                addTaskFromDownload(artifact, libsRoot.resolve(artifact.get("path").getAsString()), "lib: " + name);
+                String name = lib.has("name") ? lib.get("name").getAsString() : null;
+                if (name == null && dl.has("artifact") && dl.getAsJsonObject("artifact").has("path")) {
+                    name = dl.getAsJsonObject("artifact").get("path").getAsString();
+                }
+                // artifact 主体（有些库只有 classifiers 没有 artifact，不能因此跳过 natives）
+                if (dl.has("artifact")) {
+                    JsonObject artifact = dl.getAsJsonObject("artifact");
+                    addTaskFromDownload(artifact, libsRoot.resolve(artifact.get("path").getAsString()),
+                            "lib: " + name);
+                }
                 // natives classifier（如 lwjgl-platform / jinput-platform）
                 if (dl.has("classifiers") && lib.has("natives")
                         && lib.getAsJsonObject("natives").has(osName)) {
@@ -191,10 +208,13 @@ public final class VersionDownloader {
             addTask(assetIndex.get("url").getAsString(), indexPath,
                     assetIndex.has("size") ? assetIndex.get("size").getAsLong() : -1,
                     assetIndex.has("sha1") ? assetIndex.get("sha1").getAsString() : null,
-                    "asset index: " + assetIndexId);
+                    "asset index: " + assetIndexId, null);
         }
         if (Files.exists(indexPath)) {
-            collectAssetObjects(indexPath, assetsDir);
+            collectAssetObjects(indexPath, assetsDir, gameDir);
+        } else if (assetIndex != null) {
+            pendingAssetIndexPath = indexPath;
+            pendingAssetDir = assetsDir;
         }
 
         for (Task t : tasks) {
@@ -211,18 +231,21 @@ public final class VersionDownloader {
         }
     }
 
-    private void collectAssetObjects(Path indexPath, Path assetsDir) throws IOException {
+    private void collectAssetObjects(Path indexPath, Path assetsDir, Path gameDir) throws IOException {
         JsonObject root = JsonParser.parseString(Files.readString(indexPath)).getAsJsonObject();
         if (!root.has("objects")) {
             return;
         }
         Path objectsDir = assetsDir.resolve("objects");
+        // 旧版资源索引：游戏从 gameDir/resources/<原路径> 读音效等资源（virtual assets）
+        boolean virtual = root.has("map_to_resources") && root.get("map_to_resources").getAsBoolean();
         for (Map.Entry<String, JsonElement> entry : root.getAsJsonObject("objects").entrySet()) {
             JsonObject o = entry.getValue().getAsJsonObject();
             String hash = o.get("hash").getAsString();
             Path dest = objectsDir.resolve(hash.substring(0, 2)).resolve(hash);
             String url = "https://resources.download.minecraft.net/" + hash.substring(0, 2) + "/" + hash;
-            addTask(url, dest, o.get("size").getAsLong(), hash, "asset: " + entry.getKey());
+            Path mapped = virtual ? gameDir.resolve("resources").resolve(entry.getKey()) : null;
+            addTask(url, dest, o.get("size").getAsLong(), hash, "asset: " + entry.getKey(), mapped);
         }
     }
 
@@ -232,7 +255,7 @@ public final class VersionDownloader {
         }
         long size = dl.has("size") ? dl.get("size").getAsLong() : -1;
         String sha1 = dl.has("sha1") ? dl.get("sha1").getAsString() : null;
-        addTask(dl.get("url").getAsString(), dest, size, sha1, label);
+        addTask(dl.get("url").getAsString(), dest, size, sha1, label, null);
     }
 
     /** rules allow/disallow（仅看 os.name，简化实现） */
@@ -255,11 +278,12 @@ public final class VersionDownloader {
         return allowed;
     }
 
-    private void addTask(String url, Path dest, long size, String sha1, String label) {
-        if (isTaskComplete(new Task(url, dest, size, sha1, label))) {
+    private void addTask(String url, Path dest, long size, String sha1, String label, Path copyFrom) {
+        Task probe = new Task(url, dest, size, sha1, label);
+        if (isTaskComplete(probe) && (copyFrom == null || Files.exists(copyFrom))) {
             return;
         }
-        tasks.add(new Task(url, dest, size, sha1, label));
+        tasks.add(new Task(url, dest, size, sha1, label, copyFrom));
     }
 
     private boolean isTaskComplete(Task t) {
@@ -270,8 +294,12 @@ public final class VersionDownloader {
             if (t.size >= 0 && Files.size(t.dest) != t.size) {
                 return false;
             }
-            if (t.sha1 != null) {
-                return t.sha1.equalsIgnoreCase(sha1Of(t.dest));
+            if (t.sha1 != null && !t.sha1.equalsIgnoreCase(sha1Of(t.dest))) {
+                return false;
+            }
+            // virtual assets：本体完好但映射副本缺失也算未完成
+            if (t.copyFrom != null && !Files.exists(t.copyFrom)) {
+                return false;
             }
             return true;
         } catch (Exception e) {
@@ -309,6 +337,49 @@ public final class VersionDownloader {
     public synchronized void start(ProgressListener listener) {
         if (state == State.RUNNING) {
             return;
+        }
+        // 索引文件尚未落地（首次下载）：先同步下载索引，再收集资源对象加入任务
+        if (pendingAssetIndexPath != null) {
+            Path indexPath = pendingAssetIndexPath;
+            Path assetsDir = pendingAssetDir;
+            pendingAssetIndexPath = null;
+            pendingAssetDir = null;
+            if (!Files.exists(indexPath)) {
+                listener.onStateChange(State.RUNNING, I18n.get("mc_launcher.download.asset_index"));
+                try {
+                    for (Task t : new ArrayList<>(tasks)) {
+                        if (t.dest.equals(indexPath)) {
+                            downloadTask(t);
+                        }
+                    }
+                } catch (Exception e) {
+                    state = State.FAILED;
+                    failMessage = "asset index: " + e.getMessage();
+                    listener.onStateChange(State.FAILED, failMessage);
+                    return;
+                }
+            }
+            try {
+                if (Files.exists(indexPath)) {
+                    collectAssetObjects(indexPath, assetsDir, gameDir);
+                    for (Task t : tasks) {
+                        long s = t.size >= 0 ? t.size : 0;
+                        if (isTaskComplete(t)) {
+                            doneBytes.addAndGet(s);
+                            filesDone.incrementAndGet();
+                        } else {
+                            long already = partialSize(t);
+                            doneBytes.addAndGet(Math.min(already, s));
+                            totalBytes.addAndGet(s);
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                state = State.FAILED;
+                failMessage = "assets: " + e.getMessage();
+                listener.onStateChange(State.FAILED, failMessage);
+                return;
+            }
         }
         if (tasks.isEmpty()) {
             state = State.DONE;
@@ -467,6 +538,11 @@ public final class VersionDownloader {
                     }
                 }
                 Files.move(part, t.dest, StandardCopyOption.REPLACE_EXISTING);
+                // virtual assets：把校验过的本体复制到 gameDir/resources/<路径>
+                if (t.copyFrom != null && !Files.exists(t.copyFrom)) {
+                    Files.createDirectories(t.copyFrom.getParent());
+                    Files.copy(t.dest, t.copyFrom, StandardCopyOption.REPLACE_EXISTING);
+                }
                 return;
             } catch (InterruptedException ie) {
                 return;
@@ -510,13 +586,28 @@ public final class VersionDownloader {
 
     /** 供启动前校验 */
     public static boolean isVersionComplete(InstalledVersion v) {
+        return checkMissingCount(v) == 0;
+    }
+
+    /**
+     * 校验版本完整性（client jar / libraries / natives / assets / virtual resources），
+     * 返回缺失或损坏的文件数；-1 表示校验失败（如版本 JSON 损坏）。
+     * 实例根目录 = 版本 json 所在 versions 的上层。
+     */
+    public static int checkMissingCount(InstalledVersion v) {
         try {
-            Path gameDir = net.minecraft.client.Minecraft.getInstance().gameDirectory.toPath();
-            VersionDownloader d = new VersionDownloader(gameDir);
+            Path jsonParent = v.jsonPath().getParent();
+            Path instDir = jsonParent != null && jsonParent.getParent() != null
+                    ? jsonParent.getParent().getParent() // instances/<inst>
+                    : net.minecraft.client.Minecraft.getInstance().gameDirectory.toPath();
+            if (instDir == null || !Files.isDirectory(instDir.resolve("libraries"))) {
+                instDir = net.minecraft.client.Minecraft.getInstance().gameDirectory.toPath();
+            }
+            VersionDownloader d = new VersionDownloader(instDir);
             d.prepare(v);
-            return d.tasks.isEmpty();
+            return d.tasks.size();
         } catch (Exception e) {
-            return false;
+            return -1;
         }
     }
 }

@@ -72,6 +72,11 @@ public class LauncherScreen extends Screen {
                         .setScreen(new LauncherOptionsScreen(this, this.minecraft.options)))
                 .bounds(cx - 100, top + 114, 200, 20).build());
 
+        // 第四行：整合包安装（.mrpack）
+        addRenderableWidget(Button.builder(Component.literal(I18n.get("mc_launcher.modpack")), b -> this.minecraft
+                        .setScreen(new ModpackScreen(this)))
+                .bounds(cx - 100, top + 140, 200, 20).build());
+
         // 左侧：实时玩家模型（跟随当前登录账号的皮肤，懒加载刷新；点击进入账户管理）
         int widgetX = Math.max(6, cx - 100 - 118);
         skinWidget = buildSkinWidget(widgetX, top + 8);

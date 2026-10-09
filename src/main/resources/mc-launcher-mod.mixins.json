@@ -5,7 +5,9 @@
   "compatibilityLevel": "JAVA_17",
   "client": [
     "TitleScreenMixin",
-    "LanguageManagerMixin"
+    "LanguageManagerMixin",
+    "ReloadableResourceManagerMixin",
+    "AccessibilityOnboardingScreenMixin"
   ],
   "injectors": {
     "defaultRequire": 1

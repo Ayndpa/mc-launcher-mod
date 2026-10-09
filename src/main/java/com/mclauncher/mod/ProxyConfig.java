@@ -24,11 +24,11 @@ public final class ProxyConfig {
         };
     }
 
-    /** HttpURLConnection 用的 Proxy 列表（按优先级） */
+    /** HttpURLConnection 用的 Proxy 列表（按优先级；openConnection(null) 等价 NO_PROXY） */
     public static Proxy[] httpProxies() {
         return switch (LauncherState.getProxyMode()) {
             case DIRECT -> new Proxy[]{Proxy.NO_PROXY};
-            case SYSTEM -> new Proxy[]{null, Proxy.NO_PROXY};
+            case SYSTEM -> new Proxy[]{Proxy.NO_PROXY};
             case CUSTOM -> new Proxy[]{
                     new Proxy(Proxy.Type.HTTP, InetSocketAddress.createUnresolved(
                             LauncherState.getProxyHost(), LauncherState.getProxyPort())),

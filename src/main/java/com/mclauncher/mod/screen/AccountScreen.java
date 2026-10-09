@@ -9,9 +9,7 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.ObjectSelectionList;
 import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.Identifier;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -280,10 +278,9 @@ public class AccountScreen extends Screen {
                 g.text(AccountScreen.this.font, I18n.get("mc_launcher.account.offline_tag"),
                         textX, top + 16, 0xFF888888);
             }
-            // 条目前绘制玩家头像（皮肤贴图 8x8 头部区域放大到 AVATAR）
-            Identifier faceTex = profileSkin(profile).body().texturePath();
-                g.blit(RenderPipelines.GUI_TEXTURED, faceTex, left, top + 2, AVATAR, AVATAR,
-                        8, 8, 8, 8, 64, 64);
+            // 条目前绘制玩家头像（原版 PlayerFaceRenderer 逻辑：脸 + 半透明帽层）
+            net.minecraft.client.gui.components.PlayerFaceExtractor.extractRenderState(
+                    g, profileSkin(profile), left, top + 2, AVATAR);
             if (hovered) {
                 hoverEntry = this;
             }
@@ -294,6 +291,9 @@ public class AccountScreen extends Screen {
                 ProfileList.this.setSelected(this);
                 selected = this.profile;
                 deleteButton.active = true;
+                if (doubled) {
+                    useSelected();
+                }
                 return true;
             }
 

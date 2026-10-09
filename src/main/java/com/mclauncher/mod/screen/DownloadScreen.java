@@ -1,11 +1,11 @@
 package com.mclauncher.mod.screen;
 
 import com.mclauncher.mod.I18n;
+import com.mclauncher.mod.Instances;
 import com.mclauncher.mod.LauncherCore;
 import com.mclauncher.mod.LauncherCore.ManifestEntry;
 import com.mclauncher.mod.VersionDownloader;
 
-import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
@@ -18,12 +18,17 @@ import java.nio.file.Path;
 /**
  * 版本下载界面：并发数设置 + 暂停/继续/取消，实时进度显示。
  * 下载 client jar、libraries、asset index 及全部资源（断点续传）。
+ * 目标实例由 InstanceNameInputScreen 输入（null = 当前实例）；
+ * 实例内目录名冲突时自动追加 (1) (2) …
  */
 public class DownloadScreen extends Screen {
     private final Screen parent;
     private final ManifestEntry entry;
+    /** 目标实例名；null = 当前实例 */
+    private final String instanceName;
 
     private VersionDownloader downloader;
+    private Instances.Instance targetInstance;
     private String status = I18n.get("mc_launcher.download.preparing");
     private VersionDownloader.State state = VersionDownloader.State.IDLE;
     private long doneBytes;
@@ -39,10 +44,11 @@ public class DownloadScreen extends Screen {
     private boolean prepared = false;
     private boolean prepareFailed = false;
 
-    public DownloadScreen(Screen parent, ManifestEntry entry) {
+    public DownloadScreen(Screen parent, ManifestEntry entry, String instanceName) {
         super(Component.literal(I18n.get("mc_launcher.download.title", entry.id())));
         this.parent = parent;
         this.entry = entry;
+        this.instanceName = instanceName;
     }
 
     @Override
@@ -95,17 +101,24 @@ public class DownloadScreen extends Screen {
             prepared = true;
             Thread t = new Thread(() -> {
                 try {
-                    Path gameDir = Minecraft.getInstance().gameDirectory.toPath();
-                    downloader = new VersionDownloader(gameDir);
+                    // 实例名 null = 当前实例；否则 instancesRoot()/<实例名>/（不存在则自动创建）
+                    Instances.Instance inst = instanceName == null
+                            ? Instances.scan().get(0)
+                            : new Instances.Instance(instanceName,
+                                    Instances.instancesRoot().resolve(instanceName));
+                    targetInstance = inst;
+                    // 冲突时自动 26.3 → 26.3(1) → 26.3(2)…
+                    Path versionDir = Instances.freeVersionDir(inst, entry.id());
+                    Files.createDirectories(versionDir);
+                    String dirName = versionDir.getFileName().toString();
+                    downloader = new VersionDownloader(inst.dir());
                     String url = entry.url();
                     String body = LauncherCore.fetchVersionJson(url);
-                    Path versionsDir = gameDir.resolve("versions").resolve(entry.id());
-                    Files.createDirectories(versionsDir);
-                    Path jsonPath = versionsDir.resolve(entry.id() + ".json");
+                    Path jsonPath = versionDir.resolve(dirName + ".json");
                     java.nio.file.Files.writeString(jsonPath, body);
                     LauncherCore.InstalledVersion v = new LauncherCore.InstalledVersion(
-                            entry.id(), jsonPath,
-                            jsonPath.getParent().resolve(entry.id() + ".jar"));
+                            dirName, jsonPath,
+                            jsonPath.getParent().resolve(dirName + ".jar"));
                     downloader.prepare(v);
                     downloader.setMaxConcurrency(parseConcurrency());
                     downloader.start(listener);

@@ -97,7 +97,9 @@ public class VersionSelectScreen extends Screen {
 
     private void openDownload() {
         if (selected != null) {
-            this.minecraft.setScreen(new DownloadScreen(this, selected));
+            // 先输入目标实例名（预填版本 id），确认后进入下载进度页
+            this.minecraft.setScreen(new InstanceNameInputScreen(this, selected.id(),
+                    (back, instanceName) -> this.minecraft.setScreen(new DownloadScreen(back, selected, instanceName))));
         }
     }
 

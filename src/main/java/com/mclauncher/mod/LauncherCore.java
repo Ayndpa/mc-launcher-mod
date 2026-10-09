@@ -144,25 +144,43 @@ public final class LauncherCore {
 
     // ---------- 本地已安装版本 ----------
 
+    /** 扫描全部实例的 versions 目录；id 去重（先扫到的优先） */
     public static List<InstalledVersion> scanInstalled() {
         List<InstalledVersion> out = new ArrayList<>();
-        Path versionsDir = Minecraft.getInstance().gameDirectory.toPath().resolve("versions");
-        if (!Files.isDirectory(versionsDir)) {
-            return out;
-        }
-        try (var stream = Files.list(versionsDir)) {
-            stream.filter(Files::isDirectory).forEach(dir -> {
-                String id = dir.getFileName().toString();
-                Path json = dir.resolve(id + ".json");
-                Path jar = dir.resolve(id + ".jar");
-                if (Files.exists(json)) {
-                    out.add(new InstalledVersion(id, json, Files.exists(jar) ? jar : null));
-                }
-            });
-        } catch (IOException ignored) {
+        List<String> seen = new ArrayList<>();
+        for (Instances.Instance inst : Instances.scan()) {
+            Path versionsDir = inst.dir().resolve("versions");
+            if (!Files.isDirectory(versionsDir)) {
+                continue;
+            }
+            try (var stream = Files.list(versionsDir)) {
+                stream.filter(Files::isDirectory).forEach(dir -> {
+                    String id = dir.getFileName().toString();
+                    // 26.3(1) 这类目录名：显示和选择用原始 id，json 里才是真实 id
+                    String baseId = stripInstanceSuffix(id);
+                    Path json = dir.resolve(id + ".json");
+                    if (!Files.exists(json)) {
+                        json = dir.resolve(baseId + ".json");
+                    }
+                    Path jar = dir.resolve(id + ".jar");
+                    if (!Files.exists(jar)) {
+                        jar = dir.resolve(baseId + ".jar");
+                    }
+                    if (Files.exists(json) && !seen.contains(id)) {
+                        seen.add(id);
+                        out.add(new InstalledVersion(id, json, Files.exists(jar) ? jar : null));
+                    }
+                });
+            } catch (IOException ignored) {
+            }
         }
         out.sort(Comparator.comparing(InstalledVersion::id));
         return out;
+    }
+
+    /** 26.3(1) → 26.3；不带后缀原样返回 */
+    public static String stripInstanceSuffix(String dirName) {
+        return dirName.replaceAll("\\(\\d+\\)$", "");
     }
 
     public static Optional<InstalledVersion> findInstalled(String id) {
@@ -456,15 +474,22 @@ public final class LauncherCore {
             authed = false;
         }
         try {
-            Minecraft mc = Minecraft.getInstance();
-            Path gameDir = mc.gameDirectory.toPath();
-            Path root = gameDir; // bootstrap 结构: gameDir 即 mc/，libraries/assets 都在下面
+            // 启动目标实例 = 版本 json 所在实例的根目录；
+            // libraries / assets 已由下载器放进该实例，因此 --gameDir 指向实例目录
+            Path jsonParent = v.jsonPath().getParent(); // versions/<dir>
+            Path instDir = jsonParent != null && jsonParent.getParent() != null
+                    ? jsonParent.getParent().getParent() // instances/<inst>（versions 的上层）
+                    : Instances.currentDir();
+            if (instDir == null || !Files.isDirectory(instDir.resolve("libraries"))) {
+                instDir = Instances.currentDir();
+            }
+            Path gameDir = instDir;
 
-            // classpath: client.jar + 版本 json 的所有 libraries（继承链）
+            // classpath: client jar + 版本 json 的所有 libraries（继承链）
             List<String> cp = new ArrayList<>();
             cp.add(v.jarPath().toAbsolutePath().toString());
             JsonObject json = JsonParser.parseString(Files.readString(v.jsonPath())).getAsJsonObject();
-            addLibraries(json, cp);
+            addLibraries(json, cp, gameDir);
             // 继承父版本
             while (json.has("inheritsFrom")) {
                 Path parent = v.jsonPath().getParent().resolve(json.get("inheritsFrom").getAsString() + ".json");
@@ -472,14 +497,14 @@ public final class LauncherCore {
                     break;
                 }
                 json = JsonParser.parseString(Files.readString(parent)).getAsJsonObject();
-                addLibraries(json, cp);
+                addLibraries(json, cp, gameDir);
             }
             String sep = System.getProperty("os.name").toLowerCase().contains("win") ? ";" : ":";
             String classpath = String.join(sep, cp);
 
             String assetIndex = readAssetIndex(v);
             String natives = v.jsonPath().getParent().resolve("natives").toString();
-            extractNatives(json, v, Path.of(natives));
+            extractNatives(json, v, Path.of(natives), gameDir);
             Files.createDirectories(Path.of(natives));
 
             // mainClass 与参数模板来自版本 JSON：远古版本（rd-xxx）的 mainClass 是
@@ -571,10 +596,9 @@ public final class LauncherCore {
     }
 
     /** 从 versions/<id>/natives/ 下的 natives-*.jar 解出 dll（跳过 META-INF），幂等 */
-    private static void extractNatives(JsonObject versionJson, InstalledVersion v, Path nativesDir) {
+    private static void extractNatives(JsonObject versionJson, InstalledVersion v, Path nativesDir, Path libsRoot) {
         try {
             Files.createDirectories(nativesDir);
-            Path libsRoot = Minecraft.getInstance().gameDirectory.toPath().resolve("libraries");
             if (!versionJson.has("libraries")) {
                 return;
             }
@@ -619,8 +643,8 @@ public final class LauncherCore {
         }
     }
 
-    private static void addLibraries(JsonObject versionJson, List<String> cp) {
-        Path libsRoot = Minecraft.getInstance().gameDirectory.toPath().resolve("libraries");
+    private static void addLibraries(JsonObject versionJson, List<String> cp, Path gameDir) {
+        Path libsRoot = gameDir.resolve("libraries");
         for (JsonElement el : versionJson.getAsJsonArray("libraries")) {
             JsonObject lib = el.getAsJsonObject();
             // 简化: 不检查 rules（本地安装时 bootstrap 已下载过对应平台库）

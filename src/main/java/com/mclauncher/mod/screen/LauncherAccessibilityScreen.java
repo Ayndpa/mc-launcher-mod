@@ -16,6 +16,10 @@ import java.util.List;
  * 按键控制、矿车视角、视角摇晃、屏幕效果、FOV/黑暗/受伤效果、附魔光效、
  * 高对比度轮廓、聊天相关（不透明度/行距/延迟/文本背景）等需要进入世界
  * 或与游戏会话绑定的入口全部删除。
+ * <p>
+ * 首次启动的 "Welcome to Minecraft!"（AccessibilityOnboardingScreen）上的
+ * 无障碍按钮经由 {@link com.mclauncher.mod.mixin.AccessibilityOnboardingScreenMixin}
+ * 指向本界面；onboarding 的完成标志由欢迎页自己的"继续"按钮负责清除。
  */
 public class LauncherAccessibilityScreen extends Screen {
     private final Screen parent;
@@ -74,6 +78,9 @@ public class LauncherAccessibilityScreen extends Screen {
 
     @Override
     public void removed() {
+        // 保存选项；不主动结束 onboarding——欢迎页的"继续"按钮负责
+        // onboardingAccessibilityFinished()，这里提前结束会导致欢迎页"继续"后
+        // 仍被记为已完成，行为偏离原版
         this.options.save();
     }
 
