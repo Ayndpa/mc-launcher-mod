@@ -51,12 +51,7 @@ public class JavaManagerScreen extends Screen {
                 .bounds(cx + 54, this.height - 72, 100, 20).build();
         addRenderableWidget(choose);
 
-        addRenderableWidget(Button.builder(Component.literal(I18n.get("mc_launcher.java.done")), b -> {
-                    if (chosenJava != null) {
-                        LauncherState.setChosenJava(chosenJava);
-                    }
-                    this.minecraft.setScreen(parent);
-                })
+        addRenderableWidget(Button.builder(Component.literal(I18n.get("mc_launcher.java.done")), b -> this.onClose())
                 .bounds(cx - 50, this.height - 44, 100, 20).build());
 
         // 优先用上次持久化的结果，缓存为空才自动搜索
@@ -103,6 +98,7 @@ public class JavaManagerScreen extends Screen {
             return;
         }
         chosenJava = selected.exe();
+        LauncherState.setChosenJava(chosenJava);
         Toasts.success(I18n.get("mc_launcher.java.chosen", selected.exe()));
     }
 

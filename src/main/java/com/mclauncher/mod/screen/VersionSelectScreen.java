@@ -22,7 +22,6 @@ import java.util.List;
  */
 public class VersionSelectScreen extends Screen {
     private final Screen parent;
-    private final String runningVersion;
     private Category category = Category.RELEASE;
     private VersionList list;
     private final List<Button> categoryButtons = new ArrayList<>();
@@ -30,10 +29,9 @@ public class VersionSelectScreen extends Screen {
     private boolean loading = true;
     private ManifestEntry selected;
 
-    public VersionSelectScreen(Screen parent, String runningVersion) {
+    public VersionSelectScreen(Screen parent) {
         super(Component.literal(I18n.get("mc_launcher.version_select.title")));
         this.parent = parent;
-        this.runningVersion = runningVersion;
     }
 
     @Override
@@ -99,7 +97,7 @@ public class VersionSelectScreen extends Screen {
 
     private void openDownload() {
         if (selected != null) {
-            this.minecraft.setScreen(new DownloadScreen(this, selected, runningVersion));
+            this.minecraft.setScreen(new DownloadScreen(this, selected));
         }
     }
 
@@ -144,10 +142,6 @@ public class VersionSelectScreen extends Screen {
 
         if (loading) {
             g.centeredText(this.font, I18n.get("mc_launcher.version_select.loading"), cx, top + 60, 0xFFAAAAAA);
-        }
-
-        if (selected != null) {
-            g.centeredText(this.font, I18n.get("mc_launcher.version_select.selected", selected.id()), cx, this.height - 58, 0xFF55FF55);
         }
 
         Toasts.draw(g, delta);
@@ -205,12 +199,10 @@ public class VersionSelectScreen extends Screen {
             @Override
             public void extractContent(GuiGraphicsExtractor g, int mouseX, int mouseY, boolean hovered, float delta) {
                 int color = VersionList.this.getSelected() == this ? 0xFF55FF55
-                        : (entry.id().equals(runningVersion) ? 0xFFFFAA00
-                                : (installed ? 0xFF7FDFFF : 0xFFFFFFFF));
+                        : (installed ? 0xFF7FDFFF : 0xFFFFFFFF);
                 int left = this.getContentX();
                 int top = this.getContentY();
-                String suffix = entry.id().equals(runningVersion) ? I18n.get("mc_launcher.version_select.running")
-                        : (installed ? I18n.get("mc_launcher.version_select.installed") : "");
+                String suffix = installed ? I18n.get("mc_launcher.version_select.installed") : "";
                 g.text(VersionSelectScreen.this.font,
                         entry.id() + suffix,
                         left + 4, top + 3,

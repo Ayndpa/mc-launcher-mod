@@ -8,7 +8,6 @@ import com.mclauncher.mod.MicrosoftAuth;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.PlayerSkinWidget;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
@@ -26,7 +25,6 @@ public class LauncherScreen extends Screen {
     private static final int FAKE_STEP_COUNT = 5;
     private static final int TICKS_PER_STEP = 35;
 
-    private EditBox usernameBox;
     private Button versionButton;
     private Button playButton;
     private PlayerSkinWidget skinWidget;
@@ -48,12 +46,6 @@ public class LauncherScreen extends Screen {
         int cx = this.width / 2;
         int top = Math.max(40, this.height / 4);
 
-        usernameBox = new EditBox(this.font, cx - 100, top + 30, 200, 20, Component.literal(I18n.get("mc_launcher.username")));
-        MicrosoftAuth.Account acc = MicrosoftAuth.getAccount();
-        usernameBox.setValue(acc != null ? acc.name() : Minecraft.getInstance().getUser().getName());
-        usernameBox.setMaxLength(16);
-        addRenderableWidget(usernameBox);
-
         launchedVersion = Minecraft.getInstance().getLaunchedVersion();
         if (launchedVersion == null || launchedVersion.isBlank()) {
             // Fabric 环境下可能拿不到运行版本，兜底扫描本地版本或用固定值
@@ -65,28 +57,23 @@ public class LauncherScreen extends Screen {
         }
 
         versionButton = Button.builder(versionLabel(), b -> this.minecraft
-                        .setScreen(new LocalVersionsScreen(this, launchedVersion)))
-                .bounds(cx - 100, top + 60, 200, 20).build();
+                        .setScreen(new LocalVersionsScreen(this)))
+                .bounds(cx - 100, top + 30, 200, 20).build();
         addRenderableWidget(versionButton);
 
         playButton = Button.builder(Component.literal(I18n.get("mc_launcher.play")), b -> startGame())
-                .bounds(cx - 100, top + 90, 200, 20).build();
+                .bounds(cx - 100, top + 60, 200, 20).build();
         addRenderableWidget(playButton);
 
         // 第二行：多人游戏（只可添加/查看服务器）
         addRenderableWidget(Button.builder(Component.literal(I18n.get("mc_launcher.multiplayer")), b -> this.minecraft
                         .setScreen(new MultiplayerScreen(this)))
-                .bounds(cx - 100, top + 118, 200, 20).build());
+                .bounds(cx - 100, top + 88, 200, 20).build());
 
-        // 第三行：Java 管理 + 游戏原版选项
-        addRenderableWidget(Button.builder(Component.literal(I18n.get("mc_launcher.java_manager")), b -> this.minecraft
-                        .setScreen(new JavaManagerScreen(this, LauncherState.getChosenJava())))
-                .bounds(cx - 100, top + 144, 98, 20).build());
-        // inWorld 必须为 false：传 true 时 OptionsScreen 会 requireNonNull(minecraft.level)，主菜单下必挂
+        // 第三行：启动器设置（Java 管理在里面）
         addRenderableWidget(Button.builder(Component.literal(I18n.get("mc_launcher.options")), b -> this.minecraft
-                        .setScreen(new net.minecraft.client.gui.screens.options.OptionsScreen(
-                                this, this.minecraft.options, false)))
-                .bounds(cx + 2, top + 144, 98, 20).build());
+                        .setScreen(new LauncherOptionsScreen(this, this.minecraft.options)))
+                .bounds(cx - 100, top + 114, 200, 20).build());
 
         // 左侧：实时玩家模型（跟随当前登录账号的皮肤，懒加载刷新；点击进入账户管理）
         int widgetX = Math.max(6, cx - 100 - 118);
@@ -95,14 +82,14 @@ public class LauncherScreen extends Screen {
 
         // 第三行：打开目录 + 退出
         addRenderableWidget(Button.builder(Component.literal(I18n.get("mc_launcher.open_gamedir")), b -> openGameDir())
-                .bounds(cx - 100, top + 196, 98, 20).build());
+                .bounds(cx - 100, top + 140, 98, 20).build());
         addRenderableWidget(Button.builder(Component.literal(I18n.get("mc_launcher.quit")), b -> Minecraft.getInstance().stop())
-                .bounds(cx + 2, top + 196, 98, 20).build());
+                .bounds(cx + 2, top + 140, 98, 20).build());
 
         // 第四行：代理设置
         addRenderableWidget(Button.builder(Component.literal(I18n.get("mc_launcher.proxy_settings")), b -> this.minecraft
                         .setScreen(new ProxySettingsScreen(this)))
-                .bounds(cx - 100, top + 222, 98, 20).build());
+                .bounds(cx - 100, top + 166, 98, 20).build());
     }
 
     /** 主界面打开时若存有凭据，静默续期；登录后刷新皮肤与账号显示 */
@@ -141,6 +128,11 @@ public class LauncherScreen extends Screen {
 
     private net.minecraft.world.entity.player.PlayerSkin currentSkinSupplier() {
         Minecraft mc = Minecraft.getInstance();
+        String offlineName = LauncherState.getActiveOfflineName();
+        if (offlineName != null) {
+            // 离线档案：用当前游戏档案的皮肤（离线模式无独立皮肤档案）
+            return mc.getSkinManager().createLookup(mc.getGameProfile(), false).get();
+        }
         MicrosoftAuth.Account acc = MicrosoftAuth.getAccount();
         if (acc != null && !acc.uuid().isEmpty()) {
             com.mojang.authlib.GameProfile profile =
@@ -239,10 +231,10 @@ public class LauncherScreen extends Screen {
         g.centeredText(this.font, I18n.get("mc_launcher.title_subtitle"), cx, top - 10, 0xFFAAAAAA);
 
         if (status != null) {
-            g.text(this.font, status, cx - 100, top + 174, done ? 0xFF55FF55 : 0xFFFFFFFF);
+            g.text(this.font, status, cx - 100, top + 144, done ? 0xFF55FF55 : 0xFFFFFFFF);
         }
         g.text(this.font, Component.literal(I18n.get("mc_launcher.click_model_hint")),
-                Math.max(6, cx - 100 - 118), top + 146, 0xFF888888);
+                Math.max(6, cx - 100 - 118), top + 116, 0xFF888888);
 
         Toasts.draw(g, delta);
 
@@ -250,7 +242,7 @@ public class LauncherScreen extends Screen {
             int barW = 200;
             int barH = 6;
             int bx = cx - barW / 2;
-            int by = top + 188;
+            int by = top + 158;
             int total = FAKE_STEP_COUNT * TICKS_PER_STEP;
             int elapsed = Math.min(total, fakeProgress * TICKS_PER_STEP + tickCounter % TICKS_PER_STEP);
             float frac = (float) elapsed / total;

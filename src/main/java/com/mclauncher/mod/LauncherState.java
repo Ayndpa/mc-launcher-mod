@@ -3,6 +3,8 @@ package com.mclauncher.mod;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Properties;
 
 import net.minecraft.client.Minecraft;
@@ -32,6 +34,12 @@ public final class LauncherState {
 
     private static String selectedVersion;
     private static Path chosenJava;
+
+    /** 当前生效的档案：activeOfflineName 非空 → 离线档案；否则用 activeMsaUuid 指向的正版账号 */
+    private static String activeMsaUuid;
+    private static String activeOfflineName;
+
+    private static final String OFFLINE_FILE = "launcher-cache/offline-profiles.json";
 
     private static volatile ProxyMode proxyMode = ProxyMode.SYSTEM;
     private static volatile String proxyHost = "127.0.0.1";
@@ -125,5 +133,76 @@ public final class LauncherState {
 
     public static void setChosenJava(Path p) {
         chosenJava = p;
+    }
+
+    // ---------- 档案 ----------
+
+    public static String getActiveMsaUuid() {
+        return activeMsaUuid;
+    }
+
+    public static void setActiveMsaUuid(String uuid) {
+        activeMsaUuid = uuid;
+        activeOfflineName = null;
+    }
+
+    public static String getActiveOfflineName() {
+        return activeOfflineName;
+    }
+
+    public static void setActiveOfflineName(String name) {
+        activeOfflineName = name;
+    }
+
+    // ---------- 离线档案 ----------
+
+    /** 离线档案 = 离线用户名。存到 launcher-cache/offline-profiles.json */
+    public static List<String> loadOfflineProfiles() {
+        try {
+            Path f = offlineFile();
+            if (!Files.exists(f)) {
+                return new ArrayList<>();
+            }
+            List<String> out = new ArrayList<>();
+            for (var el : com.google.gson.JsonParser.parseString(Files.readString(f)).getAsJsonArray()) {
+                out.add(el.getAsString());
+            }
+            return out;
+        } catch (Exception e) {
+            return new ArrayList<>();
+        }
+    }
+
+    public static void saveOfflineProfiles(List<String> names) {
+        try {
+            Path f = offlineFile();
+            Files.createDirectories(f.getParent());
+            com.google.gson.JsonArray arr = new com.google.gson.JsonArray();
+            for (String n : names) {
+                arr.add(n);
+            }
+            Files.writeString(f, arr.toString());
+        } catch (IOException ignored) {
+        }
+    }
+
+    public static void addOfflineProfile(String name) {
+        List<String> all = loadOfflineProfiles();
+        all.remove(name);
+        all.add(0, name);
+        saveOfflineProfiles(all);
+    }
+
+    public static void removeOfflineProfile(String name) {
+        List<String> all = loadOfflineProfiles();
+        all.remove(name);
+        saveOfflineProfiles(all);
+        if (name.equals(activeOfflineName)) {
+            activeOfflineName = null;
+        }
+    }
+
+    private static Path offlineFile() {
+        return Minecraft.getInstance().gameDirectory.toPath().resolve(OFFLINE_FILE);
     }
 }

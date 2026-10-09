@@ -22,12 +22,10 @@ public class LocalVersionsScreen extends Screen {
     private final Screen parent;
     private VersionList list;
     private InstalledVersion selected;
-    private final String runningVersion;
 
-    public LocalVersionsScreen(Screen parent, String runningVersion) {
+    public LocalVersionsScreen(Screen parent) {
         super(Component.literal(I18n.get("mc_launcher.local_versions.title")));
         this.parent = parent;
-        this.runningVersion = runningVersion;
     }
 
     @Override
@@ -43,7 +41,7 @@ public class LocalVersionsScreen extends Screen {
         reload();
 
         addRenderableWidget(Button.builder(Component.literal(I18n.get("mc_launcher.local_versions.get_versions")), b -> this.minecraft
-                        .setScreen(new VersionSelectScreen(this, runningVersion)))
+                        .setScreen(new VersionSelectScreen(this)))
                 .bounds(cx - 154, this.height - 44, 100, 20).build());
         addRenderableWidget(Button.builder(Component.literal(I18n.get("mc_launcher.local_versions.ok")), b -> confirm())
                 .bounds(cx - 50, this.height - 44, 100, 20).build());
@@ -71,9 +69,6 @@ public class LocalVersionsScreen extends Screen {
 
         g.centeredText(this.font, I18n.get("mc_launcher.local_versions.title"), cx, top - 16, 0xFFFFFFFF);
 
-        if (selected != null) {
-            g.centeredText(this.font, I18n.get("mc_launcher.local_versions.selected", selected.id()), cx, this.height - 58, 0xFF55FF55);
-        }
     }
 
     @Override
@@ -115,15 +110,13 @@ public class LocalVersionsScreen extends Screen {
 
             @Override
             public void extractContent(GuiGraphicsExtractor g, int mouseX, int mouseY, boolean hovered, float delta) {
-                boolean isRunning = version.id().equals(runningVersion);
                 boolean isSelected = LauncherState.getSelectedVersion() != null
                         && LauncherState.getSelectedVersion().equals(version.id());
                 int color = VersionList.this.getSelected() == this ? 0xFF55FF55
-                        : (isRunning ? 0xFFFFAA00 : (isSelected ? 0xFF7FDFFF : 0xFFFFFFFF));
+                        : (isSelected ? 0xFF7FDFFF : 0xFFFFFFFF);
                 int left = this.getContentX();
                 int top = this.getContentY();
-                String suffix = isRunning ? I18n.get("mc_launcher.local_versions.running")
-                        : (isSelected ? I18n.get("mc_launcher.local_versions.pending") : "");
+                String suffix = isSelected ? I18n.get("mc_launcher.local_versions.pending") : "";
                 g.text(LocalVersionsScreen.this.font, version.id() + suffix, left + 4, top + 3, color);
                 String detail = version.jarPath() != null ? I18n.get("mc_launcher.local_versions.installed")
                         : I18n.get("mc_launcher.local_versions.missing_jar");

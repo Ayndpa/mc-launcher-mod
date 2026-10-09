@@ -443,12 +443,17 @@ public final class LauncherCore {
         if (v.jarPath() == null) {
             return new LaunchResult(false, I18n.get("mc_launcher.launch.missing_client_jar", versionId));
         }
-        // 正版账号：后台线程调用的 launch 中做一次阻塞刷新，保证 token 新鲜
-        MicrosoftAuth.Account msa = MicrosoftAuth.getAccount();
+        // 档案优先级：离线档案 > 正版账号 > 默认离线
+        String offlineName = LauncherState.getActiveOfflineName();
+        MicrosoftAuth.Account msa = offlineName == null ? MicrosoftAuth.getAccount() : null;
         boolean authed = msa != null && MicrosoftAuth.refreshIfNeeded() && MicrosoftAuth.getAccount() != null;
         if (authed) {
             msa = MicrosoftAuth.getAccount();
             username = msa.name();
+        } else if (offlineName != null) {
+            username = offlineName;
+            msa = null;
+            authed = false;
         }
         try {
             Minecraft mc = Minecraft.getInstance();

@@ -22,7 +22,6 @@ import java.nio.file.Path;
 public class DownloadScreen extends Screen {
     private final Screen parent;
     private final ManifestEntry entry;
-    private final String runningVersion;
 
     private VersionDownloader downloader;
     private String status = I18n.get("mc_launcher.download.preparing");
@@ -40,11 +39,10 @@ public class DownloadScreen extends Screen {
     private boolean prepared = false;
     private boolean prepareFailed = false;
 
-    public DownloadScreen(Screen parent, ManifestEntry entry, String runningVersion) {
+    public DownloadScreen(Screen parent, ManifestEntry entry) {
         super(Component.literal(I18n.get("mc_launcher.download.title", entry.id())));
         this.parent = parent;
         this.entry = entry;
-        this.runningVersion = runningVersion;
     }
 
     @Override

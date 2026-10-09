@@ -115,6 +115,10 @@ public class VersionLaunchScreen extends Screen {
     }
 
     private String currentUsername(Minecraft mc) {
+        String offlineName = com.mclauncher.mod.LauncherState.getActiveOfflineName();
+        if (offlineName != null) {
+            return offlineName;
+        }
         com.mclauncher.mod.MicrosoftAuth.Account acc = com.mclauncher.mod.MicrosoftAuth.getAccount();
         if (acc != null) {
             return acc.name();
