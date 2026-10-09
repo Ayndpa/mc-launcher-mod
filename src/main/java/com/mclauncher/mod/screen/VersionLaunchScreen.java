@@ -1,5 +1,6 @@
 package com.mclauncher.mod.screen;
 
+import com.mclauncher.mod.I18n;
 import com.mclauncher.mod.LauncherCore;
 import com.mclauncher.mod.LauncherState;
 
@@ -28,12 +29,12 @@ public class VersionLaunchScreen extends Screen {
     private final Screen parent;
     private final String targetVersion;
 
-    private volatile String stageText = "准备启动…";
+    private volatile String stageText = I18n.get("mc_launcher.launch.preparing");
     private volatile float progress = 0f;
     private volatile java.lang.Process process;
 
     public VersionLaunchScreen(Screen parent, String targetVersion) {
-        super(Component.literal("正在启动"));
+        super(Component.literal(I18n.get("mc_launcher.launch.title")));
         this.parent = parent;
         this.targetVersion = targetVersion;
     }
@@ -54,36 +55,36 @@ public class VersionLaunchScreen extends Screen {
         Minecraft mc = Minecraft.getInstance();
         try {
             // 1. 版本存在性
-            step(0.10f, "检查版本 " + targetVersion + "…");
+            step(0.10f, I18n.get("mc_launcher.launch.check_version", targetVersion));
             var opt = LauncherCore.findInstalled(targetVersion);
             if (opt.isEmpty()) {
-                fail("版本 " + targetVersion + " 未安装（versions 目录中没有对应 JSON）");
+                fail(I18n.get("mc_launcher.launch.version_not_installed", targetVersion));
                 return;
             }
             LauncherCore.InstalledVersion v = opt.get();
 
             // 2. client jar
-            step(0.25f, "检查 client jar…");
+            step(0.25f, I18n.get("mc_launcher.launch.check_client_jar"));
             if (v.jarPath() == null) {
-                fail("版本 " + targetVersion + " 缺少 client jar");
+                fail(I18n.get("mc_launcher.launch.missing_client_jar", targetVersion));
                 return;
             }
             sleep(200);
 
             // 3. Java 检查
-            step(0.40f, "检查 Java 运行时…");
+            step(0.40f, I18n.get("mc_launcher.launch.check_java"));
             Path java = LauncherState.getChosenJava();
             if (java == null) {
                 java = findDefaultJava();
             }
             if (java == null || !Files.exists(java)) {
-                fail("找不到可用的 Java，请在「Java 管理」中选择");
+                fail(I18n.get("mc_launcher.launch.no_java"));
                 return;
             }
             sleep(200);
 
             // 4. 组装启动参数并拉起进程
-            step(0.60f, "组装启动参数…");
+            step(0.60f, I18n.get("mc_launcher.launch.build_args"));
             String username = currentUsername(mc);
             LauncherCore.LaunchResult r = LauncherCore.launch(targetVersion, java, username);
             if (!r.ok()) {
@@ -94,7 +95,7 @@ public class VersionLaunchScreen extends Screen {
 
             // 5. 监控进程：远古版本等不兼容环境会让新进程几秒内崩溃，
             //    只有存活确认通过才算成功，否则回主菜单报错
-            step(0.80f, "确认进程存活…");
+            step(0.80f, I18n.get("mc_launcher.launch.confirm_alive"));
             if (process != null) {
                 String err = LauncherCore.confirmAlive(process, 6000);
                 if (err != null) {
@@ -105,11 +106,11 @@ public class VersionLaunchScreen extends Screen {
             }
 
             // 6. 完成
-            step(1.00f, "已启动 " + targetVersion);
+            step(1.00f, I18n.get("mc_launcher.launch.launched", targetVersion));
             sleep(800);
             Minecraft.getInstance().stop();
         } catch (Exception e) {
-            fail("启动失败: " + e.getMessage());
+            fail(I18n.get("mc_launcher.launch.failed", e.getMessage()));
         }
     }
 
@@ -164,7 +165,7 @@ public class VersionLaunchScreen extends Screen {
         int cy = this.height / 2;
         int textTop = cy - 50;
 
-        g.centeredText(this.font, Component.literal("正在启动 " + targetVersion), cx, textTop, 0xFFFFFFFF);
+        g.centeredText(this.font, Component.literal(I18n.get("mc_launcher.launch.starting", targetVersion)), cx, textTop, 0xFFFFFFFF);
         g.centeredText(this.font, Component.literal(stageText), cx, textTop + 22, 0xFFAAAAAA);
 
         // 进度条：与原版 LevelLoadingScreen.drawProgressBar 一致（黑底 + 绿色填充）

@@ -312,7 +312,7 @@ public final class VersionDownloader {
         }
         if (tasks.isEmpty()) {
             state = State.DONE;
-            listener.onStateChange(State.DONE, "所有文件已就绪，无需下载");
+            listener.onStateChange(State.DONE, I18n.get("mc_launcher.download.all_ready"));
             return;
         }
         state = State.RUNNING;
@@ -393,15 +393,15 @@ public final class VersionDownloader {
                 Thread.sleep(300);
             }
             if (state == State.CANCELLED) {
-                listener.onStateChange(State.CANCELLED, "下载已取消（.part 文件保留，可续传）");
+                listener.onStateChange(State.CANCELLED, I18n.get("mc_launcher.download.cancelled_part_kept"));
             } else {
                 state = State.DONE;
-                listener.onStateChange(State.DONE, "下载完成");
+                listener.onStateChange(State.DONE, I18n.get("mc_launcher.download.completed"));
             }
         } catch (Exception e) {
             if (state != State.CANCELLED) {
                 state = State.FAILED;
-                listener.onStateChange(State.FAILED, "下载失败: " + e.getMessage());
+                listener.onStateChange(State.FAILED, I18n.get("mc_launcher.download.failed", e.getMessage()));
             }
         } finally {
             if (pool != null) {
@@ -463,7 +463,7 @@ public final class VersionDownloader {
                     String actual = sha1Of(part);
                     if (!actual.equalsIgnoreCase(t.sha1)) {
                         Files.deleteIfExists(part);
-                        throw new IOException("SHA1 校验失败: " + t.label);
+                        throw new IOException(I18n.get("mc_launcher.download.sha1_failed", t.label));
                     }
                 }
                 Files.move(part, t.dest, StandardCopyOption.REPLACE_EXISTING);

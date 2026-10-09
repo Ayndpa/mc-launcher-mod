@@ -24,22 +24,22 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.function.Consumer;
 
 import net.minecraft.client.Minecraft;
 
 /**
  * 微软正版验证（Minecraft 账号）：
- * 设备码登录（Device Authorization Flow）→ XBL → XSTS → Minecraft Services → Profile。
+ * Live OAuth 授权码流程（浏览器登录后把最终地址栏 URL 粘贴回来）→ XBL → XSTS → Minecraft Services → Profile。
  * 刷新令牌持久化到 launcher-cache/msa-account.json，启动时自动续期，无需重复登录。
  */
 public final class MicrosoftAuth {
-    /** 官方 Minecraft 启动器 client id，开源社区通用 */
+    /** 官方 Minecraft 启动器 client id（旧版 Live OAuth 端点通用） */
     private static final String CLIENT_ID = "00000000402b5328";
-    private static final String SCOPE = "XboxLive.signin offline_access";
+    private static final String SCOPE = "service::user.auth.xboxlive.com::MBI_SSL";
 
-    private static final String MSA_DEVICECODE = "https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode";
-    private static final String MSA_TOKEN = "https://login.microsoftonline.com/consumers/oauth2/v2.0/token";
+    private static final String LIVE_AUTHORIZE = "https://login.live.com/oauth20_authorize.srf";
+    private static final String LIVE_TOKEN = "https://login.live.com/oauth20_token.srf";
+    private static final String LIVE_REDIRECT = "https://login.live.com/oauth20_desktop.srf";
     private static final String XBL_AUTH = "https://user.auth.xboxlive.com/user/authenticate";
     private static final String XSTS_AUTH = "https://xsts.auth.xboxlive.com/xsts/authorize";
     private static final String MC_LOGIN = "https://api.minecraftservices.com/authentication/login_with_xbox";
@@ -57,93 +57,85 @@ public final class MicrosoftAuth {
 
     /** 登录状态 */
     public enum State {
-        IDLE, POLLING, SUCCESS, FAILED
+        IDLE, WAITING_CODE, EXCHANGING, SUCCESS, FAILED
     }
 
     public record Account(String name, String uuid, String accessToken, String refreshToken,
                           Instant accessExpiresAt, Instant refreshedAt) {
     }
 
-    /** 一次设备码登录会话 */
-    public static final class DeviceCodeLogin {
+    /** 一次授权码登录会话 */
+    public static final class CodeLogin {
         public volatile State state = State.IDLE;
         public volatile String message = "";
-        public volatile String userCode = "";
-        public volatile String verificationUri = "";
     }
 
-    // ---------- 设备码登录 ----------
+    // ---------- 授权码登录 ----------
 
-    /** 后台线程启动设备码登录；userCode 显示给玩家，轮询完成 / 失败通过 state 通知 */
-    public static DeviceCodeLogin startDeviceCodeLogin(Consumer<String> uiUpdater) {
-        DeviceCodeLogin session = new DeviceCodeLogin();
-        Thread t = new Thread(() -> runDeviceCodeLogin(session, uiUpdater), "mc-launcher-mod-msa");
+    /** 浏览器打开的授权地址 */
+    public static String authorizeUrl() {
+        return LIVE_AUTHORIZE + "?client_id=" + CLIENT_ID
+                + "&response_type=code"
+                + "&scope=" + SCOPE
+                + "&redirect_uri=" + LIVE_REDIRECT
+                + "&cobrandid=8058f65d-ce06-4c30-9559-473c9275a396"
+                + "&prompt=select_account";
+    }
+
+    /** 从登录完成后浏览器地址栏的完整 URL 中提取授权码 */
+    public static String extractCode(String url) {
+        if (url == null) {
+            return null;
+        }
+        int q = url.indexOf('?');
+        if (q < 0) {
+            return null;
+        }
+        for (String pair : url.substring(q + 1).split("&")) {
+            if (pair.startsWith("code=")) {
+                String code = pair.substring(5);
+                return code.isEmpty() ? null : code;
+            }
+        }
+        return null;
+    }
+
+    /** 后台线程用授权码换取令牌并完成整条登录链 */
+    public static CodeLogin startCodeLogin(String authCode) {
+        CodeLogin session = new CodeLogin();
+        Thread t = new Thread(() -> runCodeLogin(session, authCode), "mc-launcher-mod-msa");
         t.setDaemon(true);
         t.start();
         return session;
     }
 
-    private static void runDeviceCodeLogin(DeviceCodeLogin s, Consumer<String> ui) {
+    private static void runCodeLogin(CodeLogin s, String authCode) {
         try {
-            s.state = State.POLLING;
-            s.message = "正在获取设备码…";
-            ui.accept(s.message);
+            s.state = State.EXCHANGING;
+            s.message = "正在换取令牌…";
 
-            Map<String, String> form = baseForm();
+            Map<String, String> form = new LinkedHashMap<>();
+            form.put("client_id", CLIENT_ID);
+            form.put("code", authCode);
+            form.put("grant_type", "authorization_code");
+            form.put("redirect_uri", LIVE_REDIRECT);
             form.put("scope", SCOPE);
-            JsonObject dc = postForm(MSA_DEVICECODE, form);
-            s.userCode = dc.get("user_code").getAsString();
-            s.verificationUri = dc.has("verification_uri") ? dc.get("verification_uri").getAsString()
-                    : "https://www.microsoft.com/link";
-            long interval = dc.has("interval") ? dc.get("interval").getAsLong() : 5;
-            String deviceCode = dc.get("device_code").getAsString();
+            JsonObject tok = postForm(LIVE_TOKEN, form);
+            String accessToken = tok.get("access_token").getAsString();
+            String refreshToken = tok.has("refresh_token") ? tok.get("refresh_token").getAsString() : "";
 
-            s.message = "打开 " + s.verificationUri + " 并输入: " + s.userCode;
-            ui.accept(s.message);
-
-            long deadline = System.currentTimeMillis() + 15 * 60 * 1000L;
-            while (System.currentTimeMillis() < deadline) {
-                Map<String, String> poll = baseForm();
-                poll.put("grant_type", "urn:ietf:params:oauth:grant-type:device_code");
-                poll.put("device_code", deviceCode);
-                JsonObject tok = postFormQuiet(MSA_TOKEN, poll);
-                String error = tok.has("error") ? tok.get("error").getAsString() : null;
-                if (error != null) {
-                    switch (error) {
-                        case "authorization_pending" -> {
-                            Thread.sleep(interval * 1000);
-                            continue;
-                        }
-                        case "slow_down" -> {
-                            Thread.sleep(interval * 1000 + 3000);
-                            continue;
-                        }
-                        default -> throw new IOException("登录被拒绝: " + error);
-                    }
-                }
-                finishWithTokens(tok, s);
-                return;
-            }
-            throw new IOException("登录超时");
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            s.state = State.FAILED;
-            s.message = "登录已取消";
+            completeChain(s, accessToken, refreshToken);
         } catch (Exception e) {
             s.state = State.FAILED;
             s.message = "登录失败: " + e.getMessage();
         }
-        ui.accept(s.message);
     }
 
-    private static void finishWithTokens(JsonObject tok, DeviceCodeLogin s) throws Exception {
-        String refreshToken = tok.get("refresh_token").getAsString();
-        String accessToken = tok.get("access_token").getAsString();
-        long expiresIn = tok.has("expires_in") ? tok.get("expires_in").getAsLong() : 3600;
-        Instant expiresAt = Instant.now().plusSeconds(expiresIn);
-
+    /** 用微软 access_token 走 XBL → XSTS → MC → Profile */
+    private static void completeChain(CodeLogin s, String msaAccessToken, String refreshToken) throws Exception {
         s.message = "Xbox 认证中…";
-        String xblToken = xblAuthenticate(accessToken);
+        // 旧版 Live 端点发的令牌直接作 RpsTicket，不带 "d=" 前缀
+        String xblToken = xblAuthenticate(msaAccessToken);
         String[] xsts = xstsAuthorize(xblToken); // [identityToken, uhs]
         s.message = "获取 Minecraft 会话…";
         String mcToken = loginWithXbox(xsts[0], xsts[1]);
@@ -151,7 +143,8 @@ public final class MicrosoftAuth {
         String name = profile.get("name").getAsString();
         String uuid = profile.get("id").getAsString();
 
-        account = new Account(name, uuid, mcToken, refreshToken, expiresAt, Instant.now());
+        account = new Account(name, uuid, mcToken, refreshToken,
+                Instant.now().plusSeconds(3600), Instant.now());
         saveAccount(account);
         s.state = State.SUCCESS;
         s.message = "已登录: " + name;
@@ -197,11 +190,13 @@ public final class MicrosoftAuth {
             return true;
         }
         try {
-            Map<String, String> form = baseForm();
-            form.put("grant_type", "refresh_token");
+            Map<String, String> form = new LinkedHashMap<>();
+            form.put("client_id", CLIENT_ID);
             form.put("refresh_token", account.refreshToken());
+            form.put("grant_type", "refresh_token");
+            form.put("redirect_uri", LIVE_REDIRECT);
             form.put("scope", SCOPE);
-            JsonObject tok = postForm(MSA_TOKEN, form);
+            JsonObject tok = postForm(LIVE_TOKEN, form);
             String refreshToken = tok.has("refresh_token")
                     ? tok.get("refresh_token").getAsString()
                     : account.refreshToken();
@@ -253,13 +248,6 @@ public final class MicrosoftAuth {
     }
 
     // ---------- MSA → XBL → XSTS → MC ----------
-
-    private static Map<String, String> baseForm() {
-        Map<String, String> form = new LinkedHashMap<>();
-        form.put("client_id", CLIENT_ID);
-        form.put("response_mode", "json");
-        return form;
-    }
 
     private static JsonObject postForm(String url, Map<String, String> form) throws Exception {
         JsonObject j = postFormQuiet(url, form);
@@ -328,7 +316,7 @@ public final class MicrosoftAuth {
         JsonObject props = new JsonObject();
         props.addProperty("AuthMethod", "RPS");
         props.addProperty("SiteName", "user.auth.xboxlive.com");
-        props.addProperty("RpsTicket", "d=" + msaAccessToken);
+        props.addProperty("RpsTicket", msaAccessToken);
         payload.add("Properties", props);
         payload.addProperty("RelyingParty", "http://auth.xboxlive.com");
         payload.addProperty("TokenType", "JWT");

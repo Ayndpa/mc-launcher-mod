@@ -1,5 +1,6 @@
 package com.mclauncher.mod.screen;
 
+import com.mclauncher.mod.I18n;
 import com.mclauncher.mod.LauncherState;
 import com.mclauncher.mod.LauncherState.ProxyMode;
 
@@ -20,7 +21,7 @@ public class ProxySettingsScreen extends Screen {
     private String status = "";
 
     public ProxySettingsScreen(Screen parent) {
-        super(Component.literal("代理设置"));
+        super(Component.literal(I18n.get("mc_launcher.proxy.title")));
         this.parent = parent;
     }
 
@@ -36,20 +37,20 @@ public class ProxySettingsScreen extends Screen {
                 .bounds(cx - 100, top + 24, 200, 20).build();
         addRenderableWidget(modeButton);
 
-        hostBox = new EditBox(this.font, cx - 100, top + 62, 148, 20, Component.literal("主机"));
+        hostBox = new EditBox(this.font, cx - 100, top + 62, 148, 20, Component.literal(I18n.get("mc_launcher.proxy.host")));
         hostBox.setValue(LauncherState.getProxyHost());
-        hostBox.setHint(Component.literal("127.0.0.1"));
+        hostBox.setHint(Component.literal(I18n.get("mc_launcher.proxy.host_hint")));
         addRenderableWidget(hostBox);
 
-        portBox = new EditBox(this.font, cx + 56, top + 62, 44, 20, Component.literal("端口"));
+        portBox = new EditBox(this.font, cx + 56, top + 62, 44, 20, Component.literal(I18n.get("mc_launcher.proxy.port")));
         portBox.setValue(String.valueOf(LauncherState.getProxyPort()));
-        portBox.setHint(Component.literal("7897"));
+        portBox.setHint(Component.literal(I18n.get("mc_launcher.proxy.port_hint")));
         portBox.setMaxLength(5);
         addRenderableWidget(portBox);
 
-        addRenderableWidget(Button.builder(Component.literal("保存"), b -> save())
+        addRenderableWidget(Button.builder(Component.literal(I18n.get("mc_launcher.proxy.save")), b -> save())
                 .bounds(cx - 104, top + 100, 100, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("返回"), b -> this.minecraft.setScreen(parent))
+        addRenderableWidget(Button.builder(Component.literal(I18n.get("mc_launcher.proxy.back")), b -> this.minecraft.setScreen(parent))
                 .bounds(cx + 4, top + 100, 100, 20).build());
 
         updateFields();
@@ -62,7 +63,15 @@ public class ProxySettingsScreen extends Screen {
     }
 
     private Component modeLabel() {
-        return Component.literal("代理模式: " + LauncherState.getProxyMode().label);
+        return Component.literal(I18n.get("mc_launcher.proxy.mode", I18n.get(modeKey(LauncherState.getProxyMode()))));
+    }
+
+    private static String modeKey(ProxyMode mode) {
+        return switch (mode) {
+            case DIRECT -> "mc_launcher.proxy.mode_direct";
+            case SYSTEM -> "mc_launcher.proxy.mode_system";
+            case CUSTOM -> "mc_launcher.proxy.mode_custom";
+        };
     }
 
     private void updateFields() {
@@ -76,25 +85,25 @@ public class ProxySettingsScreen extends Screen {
         if (LauncherState.getProxyMode() == ProxyMode.CUSTOM) {
             String host = hostBox.getValue().trim();
             if (host.isEmpty()) {
-                status = "代理主机不能为空";
+                status = I18n.get("mc_launcher.proxy.host_empty");
                 return;
             }
             int port;
             try {
                 port = Integer.parseInt(portBox.getValue().trim());
             } catch (NumberFormatException e) {
-                status = "端口格式不正确";
+                status = I18n.get("mc_launcher.proxy.port_invalid");
                 return;
             }
             if (port < 1 || port > 65535) {
-                status = "端口范围 1-65535";
+                status = I18n.get("mc_launcher.proxy.port_range");
                 return;
             }
             LauncherState.setProxyHost(host);
             LauncherState.setProxyPort(port);
         }
         LauncherState.save();
-        Toasts.success("代理设置已保存");
+        Toasts.success(I18n.get("mc_launcher.proxy.saved"));
         this.minecraft.setScreen(parent);
     }
 
@@ -105,11 +114,11 @@ public class ProxySettingsScreen extends Screen {
         int cx = this.width / 2;
         int top = Math.max(40, this.height / 4);
 
-        g.centeredText(this.font, "代理设置", cx, top - 20, 0xFFFFFFFF);
-        g.text(this.font, "主机:", cx - 100, top + 68, 0xFFAAAAAA);
-        g.text(this.font, "端口:", cx + 56, top + 68, 0xFFAAAAAA);
+        g.centeredText(this.font, I18n.get("mc_launcher.proxy.title"), cx, top - 20, 0xFFFFFFFF);
+        g.text(this.font, I18n.get("mc_launcher.proxy.host_label"), cx - 100, top + 68, 0xFFAAAAAA);
+        g.text(this.font, I18n.get("mc_launcher.proxy.port_label"), cx + 56, top + 68, 0xFFAAAAAA);
         g.centeredText(this.font,
-                "网络请求将按所选模式连接；下载/登录/清单均生效",
+                I18n.get("mc_launcher.proxy.effect_hint"),
                 cx, top + 132, 0xFF888888);
 
         if (!status.isEmpty()) {

@@ -1,5 +1,6 @@
 package com.mclauncher.mod.screen;
 
+import com.mclauncher.mod.I18n;
 import com.mclauncher.mod.LauncherCore;
 import com.mclauncher.mod.LauncherCore.JavaInstall;
 import com.mclauncher.mod.LauncherState;
@@ -26,7 +27,7 @@ public class JavaManagerScreen extends Screen {
     private Path chosenJava; // 启动时优先使用的 java.exe
 
     public JavaManagerScreen(Screen parent, Path currentChosen) {
-        super(Component.literal("Java 管理"));
+        super(Component.literal(I18n.get("mc_launcher.java.title")));
         this.parent = parent;
         this.chosenJava = currentChosen;
     }
@@ -42,15 +43,15 @@ public class JavaManagerScreen extends Screen {
         list.setX((this.width - 380) / 2);
         addRenderableWidget(list);
 
-        addRenderableWidget(Button.builder(Component.literal("自动搜索"), b -> startSearch())
+        addRenderableWidget(Button.builder(Component.literal(I18n.get("mc_launcher.java.auto_search")), b -> startSearch())
                 .bounds(cx - 154, this.height - 72, 100, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("添加路径"), b -> addByInputDialog())
+        addRenderableWidget(Button.builder(Component.literal(I18n.get("mc_launcher.java.add_path")), b -> addByInputDialog())
                 .bounds(cx - 50, this.height - 72, 100, 20).build());
-        Button choose = Button.builder(Component.literal("使用此 Java"), b -> useSelected())
+        Button choose = Button.builder(Component.literal(I18n.get("mc_launcher.java.use_this")), b -> useSelected())
                 .bounds(cx + 54, this.height - 72, 100, 20).build();
         addRenderableWidget(choose);
 
-        addRenderableWidget(Button.builder(Component.literal("完成"), b -> {
+        addRenderableWidget(Button.builder(Component.literal(I18n.get("mc_launcher.java.done")), b -> {
                     if (chosenJava != null) {
                         LauncherState.setChosenJava(chosenJava);
                     }
@@ -88,21 +89,21 @@ public class JavaManagerScreen extends Screen {
         this.minecraft.setScreen(new JavaPathInputScreen(this, path -> {
             if (path != null && Files.exists(path)) {
                 LauncherCore.addJavaDir(path);
-                Toasts.success("已添加 " + path);
+                Toasts.success(I18n.get("mc_launcher.java.added", path));
                 startSearch();
             } else {
-                Toasts.error("路径不存在");
+                Toasts.error(I18n.get("mc_launcher.java.path_not_exists"));
             }
         }));
     }
 
     private void useSelected() {
         if (selected == null) {
-            Toasts.warn("请先在列表中选择一个 Java");
+            Toasts.warn(I18n.get("mc_launcher.java.select_first"));
             return;
         }
         chosenJava = selected.exe();
-        Toasts.success("已选择 " + selected.exe());
+        Toasts.success(I18n.get("mc_launcher.java.chosen", selected.exe()));
     }
 
     @Override
@@ -112,13 +113,13 @@ public class JavaManagerScreen extends Screen {
         int cx = this.width / 2;
         int top = Math.max(36, this.height / 6);
 
-        g.centeredText(this.font, "Java 版本管理", cx, top - 16, 0xFFFFFFFF);
+        g.centeredText(this.font, I18n.get("mc_launcher.java.title"), cx, top - 16, 0xFFFFFFFF);
         String cur = chosenJava != null ? chosenJava.toString()
-                : "（未指定，将使用默认 Java）";
-        g.centeredText(this.font, "当前: " + cur, cx, top - 2, 0xFFAAAAAA);
+                : I18n.get("mc_launcher.java.current_default");
+        g.centeredText(this.font, I18n.get("mc_launcher.java.current", cur), cx, top - 2, 0xFFAAAAAA);
 
         if (searching) {
-            g.centeredText(this.font, "搜索中…", cx, top + 60, 0xFFAAAAAA);
+            g.centeredText(this.font, I18n.get("mc_launcher.java.searching"), cx, top + 60, 0xFFAAAAAA);
         }
 
         Toasts.draw(g, delta);
@@ -167,7 +168,8 @@ public class JavaManagerScreen extends Screen {
                 int color = JavaList.this.getSelected() == this ? 0xFF55FF55 : (chosen ? 0xFF7FDFFF : 0xFFFFFFFF);
                 int left = this.getContentX();
                 int top = this.getContentY();
-                String label = "Java " + java.version() + (java.vendor().isEmpty() ? "" : " (" + java.vendor() + ")");
+                String label = I18n.get("mc_launcher.java.label", java.version())
+                        + (java.vendor().isEmpty() ? "" : " (" + java.vendor() + ")");
                 g.text(JavaManagerScreen.this.font, label, left + 4, top + 3, color);
                 String path = java.exe().toString();
                 if (path.length() > 60) {

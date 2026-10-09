@@ -4,8 +4,7 @@
   "package": "com.mclauncher.mod.mixin",
   "compatibilityLevel": "JAVA_17",
   "client": [
-    "TitleScreenMixin",
-    "LanguageManagerMixin"
+    "TitleScreenMixin"
   ],
   "injectors": {
     "defaultRequire": 1

@@ -1,5 +1,6 @@
 package com.mclauncher.mod.screen;
 
+import com.mclauncher.mod.I18n;
 import com.mclauncher.mod.LauncherCore;
 import com.mclauncher.mod.LauncherCore.InstalledVersion;
 import com.mclauncher.mod.LauncherState;
@@ -24,7 +25,7 @@ public class LocalVersionsScreen extends Screen {
     private final String runningVersion;
 
     public LocalVersionsScreen(Screen parent, String runningVersion) {
-        super(Component.literal("本地版本"));
+        super(Component.literal(I18n.get("mc_launcher.local_versions.title")));
         this.parent = parent;
         this.runningVersion = runningVersion;
     }
@@ -41,12 +42,12 @@ public class LocalVersionsScreen extends Screen {
         addRenderableWidget(list);
         reload();
 
-        addRenderableWidget(Button.builder(Component.literal("获取版本"), b -> this.minecraft
+        addRenderableWidget(Button.builder(Component.literal(I18n.get("mc_launcher.local_versions.get_versions")), b -> this.minecraft
                         .setScreen(new VersionSelectScreen(this, runningVersion)))
                 .bounds(cx - 154, this.height - 44, 100, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("确定"), b -> confirm())
+        addRenderableWidget(Button.builder(Component.literal(I18n.get("mc_launcher.local_versions.ok")), b -> confirm())
                 .bounds(cx - 50, this.height - 44, 100, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("返回"), b -> this.minecraft.setScreen(parent))
+        addRenderableWidget(Button.builder(Component.literal(I18n.get("mc_launcher.local_versions.back")), b -> this.minecraft.setScreen(parent))
                 .bounds(cx + 54, this.height - 44, 100, 20).build());
     }
 
@@ -68,10 +69,10 @@ public class LocalVersionsScreen extends Screen {
         int cx = this.width / 2;
         int top = Math.max(36, this.height / 6);
 
-        g.centeredText(this.font, "本地版本", cx, top - 16, 0xFFFFFFFF);
+        g.centeredText(this.font, I18n.get("mc_launcher.local_versions.title"), cx, top - 16, 0xFFFFFFFF);
 
         if (selected != null) {
-            g.centeredText(this.font, "已选择: " + selected.id(), cx, this.height - 58, 0xFF55FF55);
+            g.centeredText(this.font, I18n.get("mc_launcher.local_versions.selected", selected.id()), cx, this.height - 58, 0xFF55FF55);
         }
     }
 
@@ -121,9 +122,11 @@ public class LocalVersionsScreen extends Screen {
                         : (isRunning ? 0xFFFFAA00 : (isSelected ? 0xFF7FDFFF : 0xFFFFFFFF));
                 int left = this.getContentX();
                 int top = this.getContentY();
-                String suffix = isRunning ? "  [运行中]" : (isSelected ? "  [待启动]" : "");
+                String suffix = isRunning ? I18n.get("mc_launcher.local_versions.running")
+                        : (isSelected ? I18n.get("mc_launcher.local_versions.pending") : "");
                 g.text(LocalVersionsScreen.this.font, version.id() + suffix, left + 4, top + 3, color);
-                String detail = version.jarPath() != null ? "已安装" : "缺少 jar";
+                String detail = version.jarPath() != null ? I18n.get("mc_launcher.local_versions.installed")
+                        : I18n.get("mc_launcher.local_versions.missing_jar");
                 g.text(LocalVersionsScreen.this.font, detail, left + 4, top + 13, 0xFF888888);
             }
 

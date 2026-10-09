@@ -4,28 +4,11 @@
 
 | 组件 | 版本 | 路径 |
 |------|------|------|
-| JDK | Temurin 25.0.4.1+1 | `D:\Dev\Codes\Test\mc-launcher\mc\java\jdk-25.0.4.1+1` |
-| Gradle | 9.7.0（本机无 wrapper，需手动下载） | 见下方"获取 Gradle" |
+| JDK | Temurin 25（vfox 或实例自带） | 见下方"JDK 与 Gradle" |
+| Gradle | 9.7.0（本机无 wrapper） | `D:\Dev\Codes\Test\gradle-9.7.0\bin\gradle.bat` |
 | Minecraft / Loader | 26.1.2 / Fabric Loader 0.19.5 | 见 `gradle.properties` |
 | Loom 插件 | net.fabricmc.fabric-loom 1.18-SNAPSHOT | |
 | 代理 | `127.0.0.1:7897`（gradle.properties 已配置，下载依赖时需要） | |
-
-## 获取 Gradle 9.7.0
-
-项目没有 `gradlew` wrapper，本机只装了 Gradle 7.4 / 8.x，而 Loom 1.18 需要 Gradle 9.x。
-首次编译前下载并解压一次（约 150MB）：
-
-```powershell
-$dest = "$env:TEMP\kilo\gradle-9.7.0-bin.zip"
-Invoke-WebRequest -Uri "https://mirrors.cloud.tencent.com/gradle/gradle-9.7.0-bin.zip" `
-    -OutFile $dest -Proxy "http://127.0.0.1:7897"
-Expand-Archive -Path $dest -DestinationPath "$env:TEMP\kilo\gradle970" -Force
-```
-
-之后 Gradle 可执行文件位于：
-`$env:TEMP\kilo\gradle970\gradle-9.7.0\bin\gradle.bat`
-
-> 建议把解压目录移到固定位置（如 `D:\Dev\Tools\gradle-9.7.0`），下文以临时目录路径为例。
 
 ## 编译
 
@@ -33,37 +16,66 @@ Expand-Archive -Path $dest -DestinationPath "$env:TEMP\kilo\gradle970" -Force
 
 ```powershell
 cd D:\Dev\Codes\Test\mc-launcher-mod
-$env:JAVA_HOME = "D:\Dev\Codes\Test\mc-launcher\mc\java\jdk-25.0.4.1+1"
-& "$env:TEMP\kilo\gradle970\gradle-9.7.0\bin\gradle.bat" build
+$env:JAVA_HOME = "C:\Users\Admin\.vfox\cache\java\v-25.0.2+10\java-25.0.2+10"
+$env:Path = "$env:JAVA_HOME\bin;$env:Path"
+& "D:\Dev\Codes\Test\gradle-9.7.0\bin\gradle.bat" --offline "-Dorg.gradle.java.home=$env:JAVA_HOME" build
 ```
 
 - 产物：`build\libs\mc-launcher-mod-1.0.0.jar`
 - 只检查编译错误：把 `build` 换成 `compileJava`
-- 增量编译通常 1~10 秒；首次构建需联网拉取依赖（走 7897 代理）
+- 增量编译通常 1~10 秒；依赖已缓存，`--offline` 即可，首次构建才需要联网（走 7897 代理）
 
 ## 部署
 
-把构建产物覆盖到游戏 mods 目录：
+把构建产物覆盖到游戏实例的 mods 目录：
 
 ```powershell
 Copy-Item "build\libs\mc-launcher-mod-1.0.0.jar" `
-    "D:\Dev\Codes\Test\mc-launcher\mc\mods\mc-launcher-mod-1.0.0.jar" -Force
+    "D:\Dev\Codes\Test\mc-launcher\target\debug\instances\default\mods\mc-launcher-mod-1.0.0.jar" -Force
 ```
 
 部署后重启游戏生效。
+
+### 实际路径（重要）
+
+文档早期版本写的 `D:\Dev\Codes\Test\mc-launcher\mc\...` 已不存在。Rust 启动器
+（`mc-launcher`）运行时的真实实例目录是：
+
+| 用途 | 路径 |
+|------|------|
+| 游戏实例根目录 | `D:\Dev\Codes\Test\mc-launcher\target\debug\instances\default\` |
+| mods 目录 | `...\instances\default\mods\` |
+| Java 运行时 | `...\instances\default\java\jdk-25.0.4.1+1` |
+
+仓库里的 `D:\Dev\Codes\Test\mc-launcher\src\embedded\` 只是打包进启动器的**资源模板**，
+把 jar 复制到那里不会生效。
+
+### JDK 与 Gradle
+
+本机 PATH 上的 `java` 是 Java 8，Gradle 9.x 会因 "requires JVM 17 or later" 直接拒绝启动
+（`-Dorg.gradle.java.home` 也无法绕过该前置检查）。可用的 JDK 25 有两个：
+
+- `C:\Users\Admin\.vfox\cache\java\v-25.0.2+10\java-25.0.2+10`
+- `D:\Dev\Codes\Test\mc-launcher\target\debug\instances\default\java\jdk-25.0.4.1+1`
+
+Gradle 9.7.0 已固定在 `D:\Dev\Codes\Test\gradle-9.7.0\bin\gradle.bat`，无需重新下载。
+依赖已全部进缓存，加 `--offline` 即可，不必开代理。
 
 ## 一键脚本（编译 + 部署）
 
 ```powershell
 cd D:\Dev\Codes\Test\mc-launcher-mod
-$env:JAVA_HOME = "D:\Dev\Codes\Test\mc-launcher\mc\java\jdk-25.0.4.1+1"
-& "$env:TEMP\kilo\gradle970\gradle-9.7.0\bin\gradle.bat" build -q
+$env:JAVA_HOME = "C:\Users\Admin\.vfox\cache\java\v-25.0.2+10\java-25.0.2+10"
+$env:Path = "$env:JAVA_HOME\bin;$env:Path"
+& "D:\Dev\Codes\Test\gradle-9.7.0\bin\gradle.bat" --offline "-Dorg.gradle.java.home=$env:JAVA_HOME" build -q
 if ($?) {
     Copy-Item "build\libs\mc-launcher-mod-1.0.0.jar" `
-        "D:\Dev\Codes\Test\mc-launcher\mc\mods\mc-launcher-mod-1.0.0.jar" -Force
-    Get-Item "D:\Dev\Codes\Test\mc-launcher\mc\mods\mc-launcher-mod-1.0.0.jar" | Select-Object LastWriteTime
+        "D:\Dev\Codes\Test\mc-launcher\target\debug\instances\default\mods\mc-launcher-mod-1.0.0.jar" -Force
+    Get-Item "D:\Dev\Codes\Test\mc-launcher\target\debug\instances\default\mods\mc-launcher-mod-1.0.0.jar" | Select-Object LastWriteTime
 }
 ```
+
+> PowerShell 5.1 下 `-Dorg.gradle.java.home=...` 必须整体加引号，否则会被拆成 task 名。
 
 ## 常见问题
 

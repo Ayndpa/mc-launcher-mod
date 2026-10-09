@@ -437,11 +437,11 @@ public final class LauncherCore {
     public static LaunchResult launch(String versionId, Path javaExe, String username) {
         Optional<InstalledVersion> opt = findInstalled(versionId);
         if (opt.isEmpty()) {
-            return new LaunchResult(false, "版本 " + versionId + " 未安装（versions 目录中没有对应 JSON）");
+            return new LaunchResult(false, I18n.get("mc_launcher.launch.version_not_installed", versionId));
         }
         InstalledVersion v = opt.get();
         if (v.jarPath() == null) {
-            return new LaunchResult(false, "版本 " + versionId + " 缺少 client jar");
+            return new LaunchResult(false, I18n.get("mc_launcher.launch.missing_client_jar", versionId));
         }
         // 正版账号：后台线程调用的 launch 中做一次阻塞刷新，保证 token 新鲜
         MicrosoftAuth.Account msa = MicrosoftAuth.getAccount();
@@ -524,9 +524,9 @@ public final class LauncherCore {
             }
 
             Process proc = new ProcessBuilder(cmd).directory(gameDir.toFile()).start();
-            return new LaunchResult(true, "已启动 " + versionId, proc);
+            return new LaunchResult(true, I18n.get("mc_launcher.launch.launched", versionId), proc);
         } catch (Exception e) {
-            return new LaunchResult(false, "启动失败: " + e.getMessage());
+            return new LaunchResult(false, I18n.get("mc_launcher.launch.failed", e.getMessage()));
         }
     }
 
@@ -541,7 +541,7 @@ public final class LauncherCore {
             while (System.currentTimeMillis() < deadline) {
                 if (!proc.isAlive()) {
                     int code = proc.exitValue();
-                    return "版本进程启动后立刻退出 (exit code " + code + ")";
+                    return I18n.get("mc_launcher.launch.exited_early", code);
                 }
                 Thread.sleep(200);
             }

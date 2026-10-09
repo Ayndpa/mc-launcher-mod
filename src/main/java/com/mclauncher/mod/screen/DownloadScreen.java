@@ -1,5 +1,6 @@
 package com.mclauncher.mod.screen;
 
+import com.mclauncher.mod.I18n;
 import com.mclauncher.mod.LauncherCore;
 import com.mclauncher.mod.LauncherCore.ManifestEntry;
 import com.mclauncher.mod.VersionDownloader;
@@ -24,7 +25,7 @@ public class DownloadScreen extends Screen {
     private final String runningVersion;
 
     private VersionDownloader downloader;
-    private String status = "准备中…";
+    private String status = I18n.get("mc_launcher.download.preparing");
     private VersionDownloader.State state = VersionDownloader.State.IDLE;
     private long doneBytes;
     private long totalBytes;
@@ -40,7 +41,7 @@ public class DownloadScreen extends Screen {
     private boolean prepareFailed = false;
 
     public DownloadScreen(Screen parent, ManifestEntry entry, String runningVersion) {
-        super(Component.literal("下载版本"));
+        super(Component.literal(I18n.get("mc_launcher.download.title", entry.id())));
         this.parent = parent;
         this.entry = entry;
         this.runningVersion = runningVersion;
@@ -51,7 +52,7 @@ public class DownloadScreen extends Screen {
         int cx = this.width / 2;
         int top = Math.max(36, this.height / 6);
 
-        concurrencyBox = new EditBox(this.font, cx + 40, top + 8, 60, 18, Component.literal("并发数"));
+        concurrencyBox = new EditBox(this.font, cx + 40, top + 8, 60, 18, Component.literal(I18n.get("mc_launcher.download.concurrency")));
         concurrencyBox.setValue("4");
         concurrencyBox.setMaxLength(2);
         concurrencyBox.setResponder(s -> {
@@ -65,7 +66,7 @@ public class DownloadScreen extends Screen {
         });
         addRenderableWidget(concurrencyBox);
 
-        pauseBtn = Button.builder(Component.literal("暂停"), b -> {
+        pauseBtn = Button.builder(Component.literal(I18n.get("mc_launcher.download.pause")), b -> {
                     if (downloader != null) {
                         downloader.pause();
                     }
@@ -73,7 +74,7 @@ public class DownloadScreen extends Screen {
                 .bounds(cx - 154, this.height - 44, 100, 20).build();
         addRenderableWidget(pauseBtn);
 
-        resumeBtn = Button.builder(Component.literal("继续"), b -> {
+        resumeBtn = Button.builder(Component.literal(I18n.get("mc_launcher.download.resume")), b -> {
                     if (downloader != null) {
                         downloader.resume(listener);
                     }
@@ -81,7 +82,7 @@ public class DownloadScreen extends Screen {
                 .bounds(cx - 50, this.height - 44, 100, 20).build();
         addRenderableWidget(resumeBtn);
 
-        cancelBtn = Button.builder(Component.literal("取消下载"), b -> {
+        cancelBtn = Button.builder(Component.literal(I18n.get("mc_launcher.download.cancel")), b -> {
                     if (downloader != null) {
                         downloader.cancel();
                     }
@@ -89,7 +90,7 @@ public class DownloadScreen extends Screen {
                 .bounds(cx + 54, this.height - 44, 100, 20).build();
         addRenderableWidget(cancelBtn);
 
-        addRenderableWidget(Button.builder(Component.literal("返回"), b -> this.minecraft.setScreen(parent))
+        addRenderableWidget(Button.builder(Component.literal(I18n.get("mc_launcher.download.back")), b -> this.minecraft.setScreen(parent))
                 .bounds(cx - 50, this.height - 20, 100, 20).build());
 
         if (!prepared && !prepareFailed) {
@@ -112,7 +113,7 @@ public class DownloadScreen extends Screen {
                     downloader.start(listener);
                 } catch (Exception e) {
                     prepareFailed = true;
-                    Toasts.error("准备下载失败: " + e.getMessage());
+                    Toasts.error(I18n.get("mc_launcher.download.prepare_failed", e.getMessage()));
                 }
             }, "mc-launcher-mod-dlprepare");
             t.setDaemon(true);
@@ -143,11 +144,11 @@ public class DownloadScreen extends Screen {
             state = s;
             status = message;
             if (s == VersionDownloader.State.FAILED) {
-                Toasts.error("下载失败: " + message);
+                Toasts.error(I18n.get("mc_launcher.download.failed", message));
             } else if (s == VersionDownloader.State.DONE) {
-                Toasts.success("版本下载完成: " + entry.id());
+                Toasts.success(I18n.get("mc_launcher.download.done", entry.id()));
             } else if (s == VersionDownloader.State.CANCELLED) {
-                Toasts.warn("下载已取消");
+                Toasts.warn(I18n.get("mc_launcher.download.cancelled"));
             }
         }
     };
@@ -169,10 +170,10 @@ public class DownloadScreen extends Screen {
         int cx = this.width / 2;
         int top = Math.max(36, this.height / 6);
 
-        g.centeredText(this.font, "下载版本: " + entry.id(), cx, top - 16, 0xFFFFFFFF);
+        g.centeredText(this.font, I18n.get("mc_launcher.download.title", entry.id()), cx, top - 16, 0xFFFFFFFF);
 
         // 并发数标签
-        g.text(this.font, "并发数:", cx - 8, top + 13, 0xFFAAAAAA);
+        g.text(this.font, I18n.get("mc_launcher.download.concurrency_label"), cx - 8, top + 13, 0xFFAAAAAA);
 
         // 进度
         int barW = 300;
@@ -186,7 +187,7 @@ public class DownloadScreen extends Screen {
         String pct = String.format("%.1f%%", frac * 100);
         String sizeLine = human(doneBytes) + " / " + human(totalBytes) + "  " + pct;
         g.centeredText(this.font, sizeLine, cx, by + 14, 0xFFFFFFFF);
-        g.centeredText(this.font, "文件: " + filesDone + "/" + filesTotal, cx, by + 28, 0xFFAAAAAA);
+        g.centeredText(this.font, I18n.get("mc_launcher.download.files", filesDone, filesTotal), cx, by + 28, 0xFFAAAAAA);
         if (!currentFile.isEmpty()) {
             String f = currentFile.length() > 60 ? "…" + currentFile.substring(currentFile.length() - 60) : currentFile;
             g.centeredText(this.font, f, cx, by + 42, 0xFF888888);
@@ -206,12 +207,12 @@ public class DownloadScreen extends Screen {
 
     private String stateLabel(VersionDownloader.State s) {
         return switch (s) {
-            case IDLE -> "待开始";
-            case RUNNING -> "下载中";
-            case PAUSED -> "已暂停";
-            case DONE -> "完成";
-            case FAILED -> "失败";
-            case CANCELLED -> "已取消";
+            case IDLE -> I18n.get("mc_launcher.download.state_idle");
+            case RUNNING -> I18n.get("mc_launcher.download.state_running");
+            case PAUSED -> I18n.get("mc_launcher.download.state_paused");
+            case DONE -> I18n.get("mc_launcher.download.state_done");
+            case FAILED -> I18n.get("mc_launcher.download.state_failed");
+            case CANCELLED -> I18n.get("mc_launcher.download.state_cancelled");
         };
     }
 

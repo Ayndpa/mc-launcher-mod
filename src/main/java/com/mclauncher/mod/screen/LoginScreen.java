@@ -1,54 +1,92 @@
 package com.mclauncher.mod.screen;
 
+import com.mclauncher.mod.I18n;
 import com.mclauncher.mod.MicrosoftAuth;
 
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 
+import java.io.IOException;
+import java.net.URI;
+
 /**
- * 微软正版登录子界面：设备码流程 —— 打开 microsoft.com/link 输入码，
- * 成功后凭据持久化（refresh_token），下次启动自动续期。 */
+ * 微软正版登录子界面：Live OAuth 授权码流程 —— 打开浏览器完成登录，
+ * 把登录完成后浏览器地址栏的完整 URL 粘贴回来即可自动完成登录。
+ * 凭据持久化（refresh_token），下次启动自动续期。 */
 public class LoginScreen extends Screen {
     private final Screen parent;
-    private MicrosoftAuth.DeviceCodeLogin login;
-    private String code = "";
+    private MicrosoftAuth.CodeLogin login;
+    private EditBox urlBox;
+    private boolean browserOpened = false;
 
     public LoginScreen(Screen parent) {
-        super(Component.literal("微软登录"));
+        super(Component.literal(I18n.get("mc_launcher.login.title")));
         this.parent = parent;
     }
 
     @Override
     protected void init() {
         int cx = this.width / 2;
+        int top = Math.max(40, this.height / 4);
 
-        addRenderableWidget(Button.builder(Component.literal("开始登录"), b -> startLogin())
-                .bounds(cx - 100, this.height / 2 + 10, 200, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("返回"), b -> this.minecraft.setScreen(parent))
-                .bounds(cx - 100, this.height / 2 + 36, 200, 20).build());
+        urlBox = new EditBox(this.font, cx - 150, top + 60, 300, 20, Component.literal(I18n.get("mc_launcher.login.url_box_hint")));
+        urlBox.setHint(Component.literal(I18n.get("mc_launcher.login.url_placeholder")));
+        addRenderableWidget(urlBox);
+
+        addRenderableWidget(Button.builder(Component.literal(I18n.get("mc_launcher.login.open_page")), b -> openBrowser())
+                .bounds(cx - 150, top + 12, 145, 20).build());
+        addRenderableWidget(Button.builder(Component.literal(I18n.get("mc_launcher.login.confirm")), b -> submitCode())
+                .bounds(cx + 5, top + 12, 145, 20).build());
+        addRenderableWidget(Button.builder(Component.literal(I18n.get("mc_launcher.login.back")), b -> this.minecraft.setScreen(parent))
+                .bounds(cx - 100, this.height - 60, 200, 20).build());
     }
 
-    private void startLogin() {
-        if (login != null && login.state == MicrosoftAuth.State.POLLING) {
+    private void openBrowser() {
+        try {
+            java.awt.Desktop.getDesktop().browse(URI.create(MicrosoftAuth.authorizeUrl()));
+            browserOpened = true;
+            Toasts.info(I18n.get("mc_launcher.login.browser_opened"));
+        } catch (IOException | UnsupportedOperationException e) {
+            // 打不开浏览器时退化为手动复制链接
+            String url = MicrosoftAuth.authorizeUrl();
+            this.minecraft.keyboardHandler.setClipboard(url);
+            browserOpened = true;
+            Toasts.info(I18n.get("mc_launcher.login.browser_failed"));
+            Toasts.info(I18n.get("mc_launcher.login.url_in_log", url));
+            com.mclauncher.mod.McLauncherMod.LOGGER.info("微软登录授权链接: {}", url);
+        }
+    }
+
+    private void submitCode() {
+        if (login != null && login.state == MicrosoftAuth.State.EXCHANGING) {
             return;
         }
-        Toasts.info("正在获取设备码…");
-        login = MicrosoftAuth.startDeviceCodeLogin(msg -> {
-            MicrosoftAuth.State s = login != null ? login.state : null;
-            if (s == MicrosoftAuth.State.SUCCESS) {
-                Toasts.success(msg);
-            } else {
-                Toasts.info(msg);
-            }
-        });
+        String url = urlBox.getValue().trim();
+        String code = MicrosoftAuth.extractCode(url);
+        if (code == null) {
+            Toasts.error(I18n.get("mc_launcher.login.no_code"));
+            return;
+        }
+        Toasts.info(I18n.get("mc_launcher.login.exchanging"));
+        login = MicrosoftAuth.startCodeLogin(code);
     }
 
     @Override
     public void tick() {
         if (login != null) {
-            code = login.userCode;
+            if (login.state == MicrosoftAuth.State.SUCCESS) {
+                Toasts.success(login.message);
+                this.minecraft.setScreen(parent);
+                return;
+            }
+            if (login.state == MicrosoftAuth.State.FAILED) {
+                Toasts.error(login.message);
+                login = null;
+            }
         }
         super.tick();
     }
@@ -60,17 +98,14 @@ public class LoginScreen extends Screen {
         int cx = this.width / 2;
         int top = Math.max(40, this.height / 4);
 
-        g.centeredText(this.font, "微软正版登录", cx, top - 20, 0xFFFFFFFF);
-        if (login == null) {
-            g.centeredText(this.font, "使用微软账号登录 Minecraft", cx, top + 20, 0xFFAAAAAA);
-            g.centeredText(this.font, "点击「开始登录」获取设备码", cx, top + 34, 0xFFAAAAAA);
-        } else {
-            if (!code.isEmpty()) {
-                g.centeredText(this.font, "1. 浏览器打开:", cx, top + 10, 0xFFAAAAAA);
-                g.centeredText(this.font, login.verificationUri, cx, top + 24, 0xFF55FFFF);
-                g.centeredText(this.font, "2. 输入设备码:", cx, top + 44, 0xFFAAAAAA);
-                g.centeredText(this.font, code, cx, top + 58, 0xFF55FF55);
-            }
+        g.centeredText(this.font, I18n.get("mc_launcher.login.title"), cx, top - 20, 0xFFFFFFFF);
+        g.centeredText(this.font, I18n.get("mc_launcher.login.step1"), cx, top - 2, 0xFFAAAAAA);
+        g.centeredText(this.font, I18n.get("mc_launcher.login.step2"), cx, top + 12, 0xFFAAAAAA);
+        g.centeredText(this.font, I18n.get("mc_launcher.login.step3"), cx, top + 26, 0xFFAAAAAA);
+        g.text(this.font, Component.literal(I18n.get("mc_launcher.login.url_label")), cx - 150, top + 48, 0xFFAAAAAA);
+
+        if (login != null && login.state == MicrosoftAuth.State.EXCHANGING) {
+            g.centeredText(this.font, login.message, cx, top + 96, 0xFF55FFFF);
         }
 
         Toasts.draw(g, delta);
